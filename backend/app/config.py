@@ -1,0 +1,59 @@
+import os
+from typing import List, Union
+from pydantic import AnyHttpUrl, field_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    PROJECT_NAME: str = "DocuMind API"
+    VERSION: str = "1.0.0"
+    API_V1_STR: str = "/api/v1"
+    ENVIRONMENT: str = "development"
+    
+    # CORS
+    BACKEND_CORS_ORIGINS: List[str] = [
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
+    ]
+
+    @field_validator("BACKEND_CORS_ORIGINS", mode="before")
+    def assemble_cors_origins(cls, v: Union[str, List[str]]) -> Union[List[str], str]:
+        if isinstance(v, str) and not v.startswith("["):
+            return [i.strip() for i in v.split(",")]
+        elif isinstance(v, (list, str)):
+            return v
+        raise ValueError(v)
+
+    # Security & JWT
+    SECRET_KEY: str = "documind_default_super_secret_jwt_key_change_in_production_987654321"
+    ALGORITHM: str = "HS256"
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+
+    # Database
+    DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/documind"
+
+    # AI / LLM
+    OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # Cloud Object Storage (S3 / MinIO / Cloudflare R2)
+    STORAGE_PROVIDER: str = "local"  # "local" or "s3"
+    LOCAL_STORAGE_DIR: str = "./storage/uploads"
+    S3_BUCKET_NAME: str = "documind-documents"
+    S3_REGION: str = "us-east-1"
+    S3_ACCESS_KEY: str = ""
+    S3_SECRET_KEY: str = ""
+    S3_ENDPOINT_URL: str = ""  # For MinIO or Cloudflare R2
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore"
+    )
+
+
+settings = Settings()
