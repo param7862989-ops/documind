@@ -20,11 +20,15 @@ import {
   MessageSquare,
   CheckSquare,
   Square,
-  X
+  X,
+  Copy,
+  Check,
+  Eye
 } from "lucide-react";
 import {
   getCurrentUser,
   getDocumentsList,
+  getDocumentChunks,
   uploadDocumentFile,
   deleteDocumentItem,
   sendChatMessage,
@@ -32,6 +36,7 @@ import {
   clearAuthToken,
   User,
   DocumentItem,
+  DocumentChunk,
   Message,
   Citation
 } from "@/lib/api";
@@ -46,12 +51,20 @@ export default function DashboardPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
+  
+  // Modals
   const [comparisonModal, setComparisonModal] = useState<{ open: boolean; answer: string; citations: Citation[] }>({
     open: false,
     answer: "",
     citations: []
   });
   const [activeCitationModal, setActiveCitationModal] = useState<Citation | null>(null);
+  const [inspectDocModal, setInspectDocModal] = useState<{ doc: DocumentItem | null; chunks: DocumentChunk[]; loading: boolean }>({
+    doc: null,
+    chunks: [],
+    loading: false
+  });
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -132,6 +145,17 @@ export default function DashboardPage() {
     }
   }
 
+  async function handleInspectDocument(doc: DocumentItem, e: React.MouseEvent) {
+    e.stopPropagation();
+    setInspectDocModal({ doc, chunks: [], loading: true });
+    try {
+      const chunks = await getDocumentChunks(doc.id);
+      setInspectDocModal({ doc, chunks, loading: false });
+    } catch {
+      setInspectDocModal({ doc, chunks: [], loading: false });
+    }
+  }
+
   function toggleDocSelection(docId: string) {
     setSelectedDocIds((prev) =>
       prev.includes(docId) ? prev.filter((id) => id !== docId) : [...prev, docId]
@@ -204,6 +228,12 @@ export default function DashboardPage() {
     } finally {
       setIsComparing(false);
     }
+  }
+
+  function copyToClipboard(text: string, index: number) {
+    navigator.clipboard.writeText(text);
+    setCopiedIndex(index);
+    setTimeout(() => setCopiedIndex(null), 2000);
   }
 
   function handleLogout() {
@@ -338,13 +368,22 @@ export default function DashboardPage() {
                       </div>
                     </div>
 
-                    <button
-                      onClick={(e) => handleDeleteDocument(doc.id, e)}
-                      title="Delete document"
-                      className="text-slate-500 hover:text-rose-400 p-1 rounded transition opacity-60 hover:opacity-100"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center space-x-1 shrink-0">
+                      <button
+                        onClick={(e) => handleInspectDocument(doc, e)}
+                        title="Inspect extracted chunks"
+                        className="text-slate-500 hover:text-blue-400 p-1 rounded transition opacity-70 hover:opacity-100"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => handleDeleteDocument(doc.id, e)}
+                        title="Delete document"
+                        className="text-slate-500 hover:text-rose-400 p-1 rounded transition opacity-70 hover:opacity-100"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
                   {/* Status Indicator Chip */}
@@ -456,7 +495,7 @@ export default function DashboardPage() {
               </div>
             </div>
           ) : (
-            messages.map((msg) => (
+            messages.map((msg, mIdx) => (
               <div
                 key={msg.id}
                 className={`flex gap-3 max-w-3xl ${
@@ -470,13 +509,22 @@ export default function DashboardPage() {
                 )}
 
                 <div
-                  className={`rounded-2xl p-4 text-sm leading-relaxed ${
+                  className={`rounded-2xl p-4 text-sm leading-relaxed relative group ${
                     msg.role === "user"
                       ? "bg-blue-600 text-white shadow-md shadow-blue-600/20 rounded-tr-none"
                       : "bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-none"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap">{msg.content}</div>
+                  {/* Copy Button */}
+                  <button
+                    onClick={() => copyToClipboard(msg.content, mIdx)}
+                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
+                    title="Copy to clipboard"
+                  >
+                    {copiedIndex === mIdx ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  </button>
+
+                  <div className="whitespace-pre-wrap pr-6">{msg.content}</div>
 
                   {/* Citations list */}
                   {msg.citations && msg.citations.length > 0 && (
@@ -553,7 +601,69 @@ export default function DashboardPage() {
         </div>
       </main>
 
-      {/* CITATION MODAL / DRAWER */}
+      {/* DOCUMENT INSPECTION MODAL */}
+      {inspectDocModal.doc && (
+        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-6">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl relative">
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-400" />
+                  {inspectDocModal.doc.original_filename}
+                </h3>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  Format: <span className="uppercase font-mono text-slate-200">{inspectDocModal.doc.file_type}</span> • Size: <span className="text-slate-200">{(inspectDocModal.doc.file_size / 1024).toFixed(1)} KB</span> • Pages: <span className="text-slate-200">{inspectDocModal.doc.page_count}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectDocModal({ doc: null, chunks: [], loading: false })}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto flex-1 space-y-4">
+              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+                Extracted Chunks & Embedding Vectors ({inspectDocModal.chunks.length})
+              </h4>
+              {inspectDocModal.loading ? (
+                <div className="py-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
+                  <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
+                  <span>Loading extracted chunks...</span>
+                </div>
+              ) : inspectDocModal.chunks.length === 0 ? (
+                <div className="py-8 text-center text-slate-500 text-xs">
+                  No indexed chunks found for this document.
+                </div>
+              ) : (
+                inspectDocModal.chunks.map((chunk) => (
+                  <div key={chunk.id} className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
+                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-slate-400 text-[11px]">
+                      <span className="font-mono text-blue-400">Chunk #{chunk.chunk_index + 1}</span>
+                      <span>Page {chunk.page_number || 1}</span>
+                    </div>
+                    <p className="text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
+                      {chunk.text_content}
+                    </p>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="p-4 border-t border-slate-800 bg-slate-950/50 flex justify-end">
+              <button
+                onClick={() => setInspectDocModal({ doc: null, chunks: [], loading: false })}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CITATION DETAIL MODAL */}
       {activeCitationModal && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
