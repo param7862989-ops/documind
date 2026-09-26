@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { 
   FileText, 
   Sparkles, 
@@ -11,16 +12,20 @@ import {
   CheckCircle2, 
   AlertCircle,
   Cpu,
-  Database
+  Database,
+  LogIn
 } from "lucide-react";
-import { checkBackendHealth, HealthCheckResponse } from "@/lib/api";
+import { checkBackendHealth, getAuthToken, HealthCheckResponse } from "@/lib/api";
 
 export default function Home() {
   const [backendHealth, setBackendHealth] = useState<HealthCheckResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [hasToken, setHasToken] = useState(false);
 
   useEffect(() => {
+    setHasToken(!!getAuthToken());
+
     async function verifyBackend() {
       try {
         setLoading(true);
@@ -38,12 +43,14 @@ export default function Home() {
     verifyBackend();
   }, []);
 
+  const getStartedHref = hasToken ? "/dashboard" : "/login";
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-blue-600 selection:text-white flex flex-col">
       {/* Navigation Header */}
       <header className="border-b border-slate-800/80 backdrop-blur-md sticky top-0 z-50 bg-slate-950/80">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
+          <Link href="/" className="flex items-center space-x-3">
             <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-cyan-400 flex items-center justify-center shadow-lg shadow-blue-500/20 ring-1 ring-white/20">
               <FileText className="w-5 h-5 text-white" />
             </div>
@@ -53,9 +60,9 @@ export default function Home() {
             <span className="px-2 py-0.5 text-xs font-semibold uppercase tracking-wider rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">
               v1.0
             </span>
-          </div>
+          </Link>
 
-          {/* Backend Status Indicator */}
+          {/* Backend Status Indicator & Navigation */}
           <div className="flex items-center space-x-4">
             <div className="hidden sm:flex items-center space-x-2 px-3 py-1.5 rounded-full text-xs font-medium bg-slate-900 border border-slate-800">
               <div className="flex items-center space-x-1.5">
@@ -77,12 +84,21 @@ export default function Home() {
               </div>
             </div>
 
-            <a
-              href="#get-started"
-              className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all duration-150"
+            <Link
+              href="/login"
+              className="text-xs font-medium text-slate-300 hover:text-white px-3 py-2 rounded-lg hover:bg-slate-900 transition flex items-center gap-1.5"
             >
-              Get Started
-            </a>
+              <LogIn className="w-3.5 h-3.5 text-slate-400" />
+              <span>Sign In</span>
+            </Link>
+
+            <Link
+              href={getStartedHref}
+              className="px-4 py-2 text-xs font-semibold rounded-lg bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20 transition-all duration-150 flex items-center gap-1.5"
+            >
+              <span>{hasToken ? "Open Dashboard" : "Get Started"}</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         </div>
       </header>
@@ -111,13 +127,13 @@ export default function Home() {
             </p>
 
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-4">
-              <a
-                href="#features"
-                className="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-xl shadow-blue-600/25 flex items-center justify-center space-x-2 transition-all duration-200"
+              <Link
+                href={getStartedHref}
+                className="w-full sm:w-auto px-7 py-3.5 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold text-sm shadow-xl shadow-blue-600/25 flex items-center justify-center space-x-2 transition-all duration-200"
               >
-                <span>Explore Capabilities</span>
+                <span>{hasToken ? "Go to Dashboard" : "Get Started Now"}</span>
                 <ArrowRight className="w-4 h-4" />
-              </a>
+              </Link>
               <a
                 href="http://localhost:8000/api/v1/docs"
                 target="_blank"
