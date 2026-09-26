@@ -3,11 +3,16 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker
 from app.config import settings
 
-# Determine connect args (e.g. check_same_thread for sqlite)
 database_url = settings.DATABASE_URL
 
-# Fallback to local sqlite file if running in local dev mode without live postgres
-if database_url.startswith("sqlite"):
+# Normalize PostgreSQL driver URL for SQLAlchemy 2.0 compatibility
+if database_url.startswith("postgres://"):
+    database_url = database_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif database_url.startswith("postgresql://") and not database_url.startswith("postgresql+"):
+    database_url = database_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
+# Connect arguments
+if "sqlite" in database_url:
     connect_args = {"check_same_thread": False}
 else:
     connect_args = {}
