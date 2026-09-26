@@ -1,0 +1,208 @@
+from typing import List, Optional
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+
+from app.core.database import get_db
+from app.models.user import User
+from app.models.conversation import Conversation, Message, MessageRole
+from app.models.document import Document
+from app.schemas.chat import (
+    MessageCreate,
+    MessageResponse,
+    ConversationResponse,
+    CompareRequest,
+    Citation,
+)
+from app.api.deps import get_current_active_user
+from app.services.rag import rag_service
+
+router = APIRouter()
+
+
+@router.post("", response_model=MessageResponse)
+def send_chat_message(
+    payload: MessageCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Submits a query to the AI RAG engine with conversational memory,
+    retrieves context chunks, and stores the user and assistant turns.
+    """
+    conversation = None
+    if payload.conversation_id:
+        conversation = (
+            db.query(Conversation)
+            .filter(Conversation.id == payload.conversation_id, Conversation.user_id == current_user.id)
+            .first()
+        )
+        if not conversation:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Conversation not found."
+            )
+
+    if not conversation:
+        # Generate clean title from initial question
+        title = payload.content[:45] + ("..." if len(payload.content) > 45 else "")
+        conversation = Conversation(
+            user_id=current_user.id,
+            title=title,
+            selected_document_ids=payload.document_ids or []
+        )
+        db.add(conversation)
+        db.commit()
+        db.refresh(conversation)
+
+    # Record User Message
+    user_msg = Message(
+        conversation_id=conversation.id,
+        role=MessageRole.USER,
+        content=payload.content,
+        citations=[]
+    )
+    db.add(user_msg)
+    db.commit()
+
+    # Load recent conversation history
+    recent_msgs = (
+        db.query(Message)
+        .filter(Message.conversation_id == conversation.id)
+        .order_by(Message.created_at.asc())
+        .limit(10)
+        .all()
+    )
+    history = [{"role": m.role.value, "content": m.content} for m in recent_msgs]
+
+    # Target documents
+    target_doc_ids = payload.document_ids or conversation.selected_document_ids
+
+    # Retrieve relevant document chunks
+    retrieved_chunks = rag_service.retrieve_relevant_chunks(
+        db=db,
+        query=payload.content,
+        user_id=current_user.id,
+        document_ids=target_doc_ids,
+        top_k=6
+    )
+
+    # Generate answer with citations
+    rag_result = rag_service.generate_grounded_answer(
+        query=payload.content,
+        retrieved_chunks=retrieved_chunks,
+        conversation_history=history
+    )
+
+    # Save Assistant Message
+    assistant_msg = Message(
+        conversation_id=conversation.id,
+        role=MessageRole.ASSISTANT,
+        content=rag_result["answer"],
+        citations=[c.model_dump() for c in rag_result["citations"]]
+    )
+    db.add(assistant_msg)
+    db.commit()
+    db.refresh(assistant_msg)
+
+    return assistant_msg
+
+
+@router.get("/conversations", response_model=List[ConversationResponse])
+def list_conversations(
+    skip: int = 0,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    List user conversations ordered by recent activity.
+    """
+    conversations = (
+        db.query(Conversation)
+        .filter(Conversation.user_id == current_user.id)
+        .order_by(Conversation.updated_at.desc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
+    return conversations
+
+
+@router.get("/conversations/{conversation_id}", response_model=ConversationResponse)
+def get_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Retrieve full conversation history and message stream.
+    """
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.user_id == current_user.id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found."
+        )
+    return conversation
+
+
+@router.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(
+    conversation_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Delete a conversation and its messages.
+    """
+    conversation = (
+        db.query(Conversation)
+        .filter(Conversation.id == conversation_id, Conversation.user_id == current_user.id)
+        .first()
+    )
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conversation not found."
+        )
+    db.delete(conversation)
+    db.commit()
+    return None
+
+
+@router.post("/compare")
+def compare_documents(
+    payload: CompareRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Performs multi-document comparison across selected document IDs.
+    """
+    if len(payload.document_ids) < 2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Please select at least two documents to compare."
+        )
+
+    query = payload.query or "Compare the main terms, obligations, termination clauses, and key differences."
+
+    retrieved_chunks = rag_service.retrieve_relevant_chunks(
+        db=db,
+        query=query,
+        user_id=current_user.id,
+        document_ids=payload.document_ids,
+        top_k=10
+    )
+
+    result = rag_service.generate_grounded_answer(
+        query=query,
+        retrieved_chunks=retrieved_chunks,
+        is_comparison=True
+    )
+
+    return result

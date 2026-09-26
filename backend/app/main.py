@@ -1,7 +1,33 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
+
 from app.config import settings
+from app.core.database import engine, Base
+import app.models  # Ensure all models are registered with Base metadata
 from app.api.v1.router import api_router
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize DB schema / pgvector extension
+    try:
+        with engine.connect() as conn:
+            # If postgresql, enable vector extension
+            if "postgres" in settings.DATABASE_URL.lower():
+                try:
+                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+                    conn.commit()
+                except Exception as ext_err:
+                    print(f"Notice: vector extension check: {ext_err}")
+            Base.metadata.create_all(bind=engine)
+            print("Database tables initialized successfully.")
+    except Exception as e:
+        print(f"Database initialization error (will retry when DB available): {e}")
+
+    yield
+
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -9,6 +35,7 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     docs_url=f"{settings.API_V1_STR}/docs",
     redoc_url=f"{settings.API_V1_STR}/redoc",
+    lifespan=lifespan,
 )
 
 # Set all CORS enabled origins
