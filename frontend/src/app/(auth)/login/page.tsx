@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Lock, Mail, ArrowRight, AlertCircle, Loader2 } from "lucide-react";
+import { FileText, Lock, Mail, ArrowRight, AlertCircle, Loader2, Sparkles } from "lucide-react";
 import { loginUser } from "@/lib/api";
 
 export default function LoginPage() {
@@ -13,17 +13,16 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    if (!email || !password) {
-      setError("Please fill in all fields.");
+  async function performLogin(loginEmail: string, loginPass: string) {
+    if (!loginEmail || !loginPass) {
+      setError("Please enter your email and password.");
       return;
     }
 
     try {
       setLoading(true);
       setError(null);
-      await loginUser(email, password);
+      await loginUser(loginEmail, loginPass);
       router.push("/dashboard");
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : "Failed to sign in. Please verify your credentials.";
@@ -31,6 +30,17 @@ export default function LoginPage() {
     } finally {
       setLoading(false);
     }
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    performLogin(email, password);
+  }
+
+  function handleDemoLogin() {
+    setEmail("founder@documind.ai");
+    setPassword("SecurePassword123!");
+    performLogin("founder@documind.ai", "SecurePassword123!");
   }
 
   return (
@@ -61,6 +71,26 @@ export default function LoginPage() {
               <span>{error}</span>
             </div>
           )}
+
+          {/* One-Click Demo Sign-in Button */}
+          <button
+            type="button"
+            onClick={handleDemoLogin}
+            disabled={loading}
+            className="w-full mb-5 py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-750 border border-slate-700 hover:border-slate-600 text-slate-200 text-xs font-semibold flex items-center justify-center space-x-2 transition shadow-sm"
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>One-Click Demo Account Sign-In</span>
+          </button>
+
+          <div className="relative mb-5 text-center">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-slate-800"></div>
+            </div>
+            <span className="relative bg-slate-900 px-3 text-[11px] uppercase tracking-wider text-slate-500">
+              Or sign in with email
+            </span>
+          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -114,13 +144,22 @@ export default function LoginPage() {
             </button>
           </form>
 
-          {/* Quick Demo Credentials */}
-          <div className="mt-5 p-3 rounded-lg bg-slate-950/50 border border-slate-800/80 text-[11px] text-slate-400">
-            <span className="font-semibold text-slate-300">Pre-seeded Test Account:</span>
-            <div className="mt-1 flex justify-between font-mono text-[10px] text-slate-400">
-              <span>founder@documind.ai</span>
-              <span>SecurePassword123!</span>
+          {/* Quick Demo Credentials Info */}
+          <div className="mt-5 p-3 rounded-lg bg-slate-950/50 border border-slate-800/80 text-[11px] text-slate-400 flex items-center justify-between">
+            <div>
+              <span className="font-semibold text-slate-300 block">Demo User:</span>
+              <span className="font-mono text-[10px] text-slate-400">founder@documind.ai</span>
             </div>
+            <button
+              type="button"
+              onClick={() => {
+                setEmail("founder@documind.ai");
+                setPassword("SecurePassword123!");
+              }}
+              className="text-xs text-blue-400 hover:text-blue-300 font-medium underline underline-offset-2"
+            >
+              Fill Credentials
+            </button>
           </div>
         </div>
 

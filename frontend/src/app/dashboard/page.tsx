@@ -34,6 +34,7 @@ import {
   sendChatMessage,
   compareDocumentsList,
   clearAuthToken,
+  getAuthToken,
   User,
   DocumentItem,
   DocumentChunk,
@@ -48,6 +49,7 @@ export default function DashboardPage() {
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputValue, setInputValue] = useState("");
+  const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
@@ -73,13 +75,21 @@ export default function DashboardPage() {
   // Load User & Documents
   useEffect(() => {
     async function initDashboard() {
+      const token = getAuthToken();
+      if (!token) {
+        router.push("/login");
+        return;
+      }
+
       try {
         const u = await getCurrentUser();
         setUser(u);
         const docs = await getDocumentsList();
         setDocuments(docs);
+        setIsAuthChecking(false);
       } catch (err: unknown) {
         console.error("Dashboard init error:", err);
+        clearAuthToken();
         router.push("/login");
       }
     }
@@ -247,6 +257,17 @@ export default function DashboardPage() {
     "What are the payment and billing conditions?",
     "Identify any automatic renewal or indemnity terms."
   ];
+
+  if (isAuthChecking) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400">
+        <div className="h-10 w-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 mb-4 shadow-lg shadow-blue-500/20 animate-pulse">
+          <RefreshCw className="w-5 h-5 animate-spin" />
+        </div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-slate-300">Authenticating DocuMind Session...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden selection:bg-blue-600 selection:text-white">
