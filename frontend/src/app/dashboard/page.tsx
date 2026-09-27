@@ -1,30 +1,42 @@
 "use client";
 
-import { useEffect, useState, useRef } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
-  FileText,
-  UploadCloud,
-  Send,
-  Trash2,
-  CheckCircle,
-  Clock,
-  AlertTriangle,
-  RefreshCw,
-  LogOut,
-  Layers,
-  Sparkles,
+  useEffect,
+  useRef,
+  useState,
+  type ChangeEvent,
+  type MouseEvent,
+} from "react";
+import { useRouter } from "next/navigation";
+import {
+  Archive,
   BookOpen,
-  ChevronRight,
-  MessageSquare,
-  CheckSquare,
-  Square,
-  X,
-  Copy,
   Check,
-  Eye
+  CheckSquare,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  Copy,
+  FileText,
+  Layers,
+  LogOut,
+  Menu,
+  MessageSquare,
+  Plus,
+  RefreshCw,
+  Search,
+  Send,
+  Settings,
+  Sparkles,
+  Square,
+  Trash2,
+  Upload,
+  User,
+  X,
+  Eye,
+  AlertCircle,
 } from "lucide-react";
+
 import {
   getCurrentUser,
   getDocumentsList,
@@ -35,166 +47,242 @@ import {
   compareDocumentsList,
   clearAuthToken,
   getAuthToken,
-  User,
+  User as UserType,
   DocumentItem,
   DocumentChunk,
   Message,
-  Citation
+  Citation,
 } from "@/lib/api";
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [user, setUser] = useState<User | null>(null);
+
+  const [user, setUser] = useState<UserType | null>(null);
   const [documents, setDocuments] = useState<DocumentItem[]>([]);
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+
   const [inputValue, setInputValue] = useState("");
+  const [searchValue, setSearchValue] = useState("");
+
   const [isAuthChecking, setIsAuthChecking] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isComparing, setIsComparing] = useState(false);
-  
-  // Modals
-  const [comparisonModal, setComparisonModal] = useState<{ open: boolean; answer: string; citations: Citation[] }>({
-    open: false,
-    answer: "",
-    citations: []
-  });
-  const [activeCitationModal, setActiveCitationModal] = useState<Citation | null>(null);
-  const [inspectDocModal, setInspectDocModal] = useState<{ doc: DocumentItem | null; chunks: DocumentChunk[]; loading: boolean }>({
+
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [showDocuments, setShowDocuments] = useState(false);
+
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+
+  const [activeCitationModal, setActiveCitationModal] =
+    useState<Citation | null>(null);
+
+  const [inspectDocModal, setInspectDocModal] = useState<{
+    doc: DocumentItem | null;
+    chunks: DocumentChunk[];
+    loading: boolean;
+  }>({
     doc: null,
     chunks: [],
-    loading: false
+    loading: false,
   });
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  const [comparisonModal, setComparisonModal] = useState<{
+    open: boolean;
+    answer: string;
+    citations: Citation[];
+  }>({
+    open: false,
+    answer: "",
+    citations: [],
+  });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  // Load User & Documents
   useEffect(() => {
-    async function initDashboard() {
+    async function initialize() {
       const token = getAuthToken();
+
       if (!token) {
         router.push("/login");
         return;
       }
 
       try {
-        const u = await getCurrentUser();
-        setUser(u);
+        const currentUser = await getCurrentUser();
         const docs = await getDocumentsList();
+
+        setUser(currentUser);
         setDocuments(docs);
         setIsAuthChecking(false);
-      } catch (err: unknown) {
-        console.error("Dashboard init error:", err);
+      } catch (error) {
+        console.error("Dashboard initialization failed:", error);
         clearAuthToken();
         router.push("/login");
       }
     }
-    initDashboard();
+
+    initialize();
   }, [router]);
 
-  // Polling for document processing status
   useEffect(() => {
-    const hasPendingDocs = documents.some(
-      (d) => d.status === "UPLOADING" || d.status === "PROCESSING"
+    const pending = documents.some(
+      (document) =>
+        document.status === "UPLOADING" ||
+        document.status === "PROCESSING"
     );
-    if (!hasPendingDocs) return;
+
+    if (!pending) return;
 
     const interval = setInterval(async () => {
       try {
-        const refreshedDocs = await getDocumentsList();
-        setDocuments(refreshedDocs);
-      } catch (err) {
-        console.error("Failed to poll documents:", err);
+        const refreshedDocuments = await getDocumentsList();
+        setDocuments(refreshedDocuments);
+      } catch (error) {
+        console.error("Document polling failed:", error);
       }
     }, 2500);
 
     return () => clearInterval(interval);
   }, [documents]);
 
-  // Auto-scroll chat
   useEffect(() => {
-    chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    chatBottomRef.current?.scrollIntoView({
+      behavior: "smooth",
+    });
+  }, [messages, isSending]);
 
-  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = e.target.files;
+  async function handleFileUpload(event: ChangeEvent<HTMLInputElement>) {
+    const files = event.target.files;
+
     if (!files || files.length === 0) return;
 
     setIsUploading(true);
     setErrorMessage(null);
 
-    for (let i = 0; i < files.length; i++) {
+    for (let index = 0; index < files.length; index++) {
       try {
-        const newDoc = await uploadDocumentFile(files[i]);
-        setDocuments((prev) => [newDoc, ...prev]);
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Upload failed";
-        setErrorMessage(`Upload error for ${files[i].name}: ${msg}`);
+        const uploadedDocument = await uploadDocumentFile(files[index]);
+
+        setDocuments((previous) => [
+          uploadedDocument,
+          ...previous,
+        ]);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Upload failed.";
+
+        setErrorMessage(
+          `Could not upload ${files[index].name}: ${message}`
+        );
       }
     }
 
     setIsUploading(false);
-    if (fileInputRef.current) fileInputRef.current.value = "";
-  }
 
-  async function handleDeleteDocument(docId: string, e: React.MouseEvent) {
-    e.stopPropagation();
-    if (!confirm("Are you sure you want to delete this document?")) return;
-
-    try {
-      await deleteDocumentItem(docId);
-      setDocuments((prev) => prev.filter((d) => d.id !== docId));
-      setSelectedDocIds((prev) => prev.filter((id) => id !== docId));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Delete failed";
-      setErrorMessage(msg);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
     }
   }
 
-  async function handleInspectDocument(doc: DocumentItem, e: React.MouseEvent) {
-    e.stopPropagation();
-    setInspectDocModal({ doc, chunks: [], loading: true });
+  async function handleDeleteDocument(
+    documentId: string,
+    event: MouseEvent
+  ) {
+    event.stopPropagation();
+
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this document?"
+    );
+
+    if (!confirmed) return;
+
     try {
-      const chunks = await getDocumentChunks(doc.id);
-      setInspectDocModal({ doc, chunks, loading: false });
-    } catch {
-      setInspectDocModal({ doc, chunks: [], loading: false });
+      await deleteDocumentItem(documentId);
+
+      setDocuments((previous) =>
+        previous.filter((document) => document.id !== documentId)
+      );
+
+      setSelectedDocIds((previous) =>
+        previous.filter((id) => id !== documentId)
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Delete failed.";
+
+      setErrorMessage(message);
     }
   }
 
-  function toggleDocSelection(docId: string) {
-    setSelectedDocIds((prev) =>
-      prev.includes(docId) ? prev.filter((id) => id !== docId) : [...prev, docId]
+  async function handleInspectDocument(
+    document: DocumentItem,
+    event: MouseEvent
+  ) {
+    event.stopPropagation();
+
+    setInspectDocModal({
+      doc: document,
+      chunks: [],
+      loading: true,
+    });
+
+    try {
+      const chunks = await getDocumentChunks(document.id);
+
+      setInspectDocModal({
+        doc: document,
+        chunks,
+        loading: false,
+      });
+    } catch (error) {
+      console.error("Failed to load chunks:", error);
+
+      setInspectDocModal({
+        doc: document,
+        chunks: [],
+        loading: false,
+      });
+    }
+  }
+
+  function toggleDocument(documentId: string) {
+    setSelectedDocIds((previous) =>
+      previous.includes(documentId)
+        ? previous.filter((id) => id !== documentId)
+        : [...previous, documentId]
     );
   }
 
-  function selectAllDocs() {
+  function selectAllDocuments() {
     if (selectedDocIds.length === documents.length) {
       setSelectedDocIds([]);
-    } else {
-      setSelectedDocIds(documents.map((d) => d.id));
+      return;
     }
+
+    setSelectedDocIds(documents.map((document) => document.id));
   }
 
   async function handleSendMessage(customPrompt?: string) {
-    const text = customPrompt || inputValue;
+    const text = customPrompt ?? inputValue;
+
     if (!text.trim() || isSending) return;
 
     const userMessage: Message = {
-      id: `temp-${Date.now()}`,
+      id: `temporary-${Date.now()}`,
       conversation_id: "current",
       role: "user",
       content: text,
       citations: [],
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, userMessage]);
-    if (!customPrompt) setInputValue("");
+    setMessages((previous) => [...previous, userMessage]);
+    setInputValue("");
     setIsSending(true);
     setErrorMessage(null);
 
@@ -204,18 +292,32 @@ export default function DashboardPage() {
         undefined,
         selectedDocIds.length > 0 ? selectedDocIds : undefined
       );
-      setMessages((prev) => [...prev, assistantMessage]);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Failed to retrieve AI answer.";
-      setErrorMessage(msg);
+
+      setMessages((previous) => [
+        ...previous,
+        assistantMessage,
+      ]);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Failed to retrieve an answer.";
+
+      setErrorMessage(message);
     } finally {
       setIsSending(false);
+
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
     }
   }
 
   async function handleCompareDocuments() {
     if (selectedDocIds.length < 2) {
-      setErrorMessage("Please select at least 2 documents to compare.");
+      setErrorMessage(
+        "Select at least two documents to compare."
+      );
       return;
     }
 
@@ -223,27 +325,40 @@ export default function DashboardPage() {
     setErrorMessage(null);
 
     try {
-      const res = await compareDocumentsList(
+      const result = await compareDocumentsList(
         selectedDocIds,
         "Compare key terms, obligations, termination clauses, and financial commitments across these documents."
       );
+
       setComparisonModal({
         open: true,
-        answer: res.answer,
-        citations: res.citations
+        answer: result.answer,
+        citations: result.citations,
       });
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Comparison failed.";
-      setErrorMessage(msg);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Comparison failed.";
+
+      setErrorMessage(message);
     } finally {
       setIsComparing(false);
     }
   }
 
-  function copyToClipboard(text: string, index: number) {
-    navigator.clipboard.writeText(text);
-    setCopiedIndex(index);
-    setTimeout(() => setCopiedIndex(null), 2000);
+  async function copyMessage(text: string, index: number) {
+    try {
+      await navigator.clipboard.writeText(text);
+
+      setCopiedIndex(index);
+
+      setTimeout(() => {
+        setCopiedIndex(null);
+      }, 1800);
+    } catch {
+      setErrorMessage("Could not copy the response.");
+    }
   }
 
   function handleLogout() {
@@ -251,514 +366,1246 @@ export default function DashboardPage() {
     router.push("/login");
   }
 
-  const promptSuggestions = [
-    "Summarize the main obligations in these documents.",
-    "Compare the termination clauses and notice periods.",
-    "What are the payment and billing conditions?",
-    "Identify any automatic renewal or indemnity terms."
+  function startNewChat() {
+    setMessages([]);
+    setInputValue("");
+    setErrorMessage(null);
+
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 100);
+  }
+
+  const filteredDocuments = documents.filter((document) =>
+    document.original_filename
+      .toLowerCase()
+      .includes(searchValue.toLowerCase())
+  );
+
+  const readyDocuments = documents.filter(
+    (document) => document.status === "READY"
+  ).length;
+
+  const suggestions = [
+    {
+      title: "Summarize my documents",
+      description: "Give me the key points and important details.",
+    },
+    {
+      title: "Compare documents",
+      description: "Find differences in terms, clauses, and obligations.",
+    },
+    {
+      title: "Find important terms",
+      description: "Locate deadlines, payments, renewals, and obligations.",
+    },
+    {
+      title: "Analyze risks",
+      description: "Identify unusual or potentially important provisions.",
+    },
   ];
 
   if (isAuthChecking) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center text-slate-400">
-        <div className="h-10 w-10 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400 mb-4 shadow-lg shadow-blue-500/20 animate-pulse">
-          <RefreshCw className="w-5 h-5 animate-spin" />
+      <div className="min-h-screen bg-[#212121] flex items-center justify-center">
+        <div className="flex items-center gap-3 text-sm text-white/60">
+          <RefreshCw className="h-4 w-4 animate-spin" />
+          Loading DocuMind...
         </div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-slate-300">Authenticating DocuMind Session...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-slate-950 text-slate-100 overflow-hidden selection:bg-blue-600 selection:text-white">
-      {/* LEFT SIDEBAR: Document Library */}
-      <aside className="w-80 sm:w-96 flex flex-col border-r border-slate-800 bg-slate-900/40 backdrop-blur-sm shrink-0">
-        {/* Workspace Brand */}
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between">
-          <Link href="/" className="flex items-center space-x-2.5">
-            <div className="h-8 w-8 rounded-lg bg-gradient-to-tr from-blue-600 to-cyan-400 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-              <FileText className="w-4 h-4" />
+    <div className="flex h-screen overflow-hidden bg-white text-[#2f2f2f]">
+      {/* MOBILE OVERLAY */}
+      {sidebarOpen && (
+        <button
+          aria-label="Close sidebar"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-black/40 md:hidden"
+        />
+      )}
+
+      {/* SIDEBAR */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-40 flex w-[280px] flex-col bg-[#171717] text-white transition-transform duration-200 md:relative md:z-20 md:translate-x-0 ${
+          sidebarOpen
+            ? "translate-x-0"
+            : "-translate-x-full md:w-0 md:overflow-hidden"
+        }`}
+      >
+        {/* Brand */}
+        <div className="flex h-14 items-center justify-between px-3">
+          <button
+            onClick={startNewChat}
+            className="flex items-center gap-2.5 px-2 py-2"
+          >
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-white text-[#171717]">
+              <FileText className="h-4 w-4" />
             </div>
-            <span className="font-bold text-base tracking-tight text-white">DocuMind</span>
-          </Link>
-          <button
-            onClick={handleLogout}
-            title="Sign out"
-            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-slate-800/80 transition"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
 
-        {/* Upload Zone */}
-        <div className="p-4 border-b border-slate-800/80">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleFileUpload}
-            multiple
-            accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg"
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isUploading}
-            className="w-full border-2 border-dashed border-slate-700 hover:border-blue-500/60 bg-slate-950/40 hover:bg-slate-900/60 rounded-xl p-4 flex flex-col items-center justify-center text-center transition group disabled:opacity-50"
-          >
-            <UploadCloud className="w-6 h-6 text-blue-400 group-hover:scale-110 transition duration-150 mb-1.5" />
-            <span className="text-xs font-semibold text-slate-200">
-              {isUploading ? "Uploading & Ingesting..." : "Upload Document(s)"}
+            <span className="text-[15px] font-semibold">
+              DocuMind
             </span>
-            <span className="text-[10px] text-slate-400 mt-0.5">PDF, DOCX, TXT, Images (OCR)</span>
+          </button>
+
+          <button
+            onClick={() => setSidebarOpen(false)}
+            className="rounded-md p-2 text-white/50 hover:bg-white/10 hover:text-white md:hidden"
+          >
+            <X className="h-4 w-4" />
           </button>
         </div>
 
-        {/* Document Selection Controls */}
-        <div className="px-4 py-2.5 border-b border-slate-800/60 flex items-center justify-between text-xs text-slate-400">
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={selectAllDocs}
-              className="flex items-center space-x-1 hover:text-slate-200 transition"
-            >
-              {selectedDocIds.length === documents.length && documents.length > 0 ? (
-                <CheckSquare className="w-3.5 h-3.5 text-blue-400" />
-              ) : (
-                <Square className="w-3.5 h-3.5" />
-              )}
-              <span>{selectedDocIds.length > 0 ? `${selectedDocIds.length} selected` : "Select All"}</span>
-            </button>
+        {/* New Chat */}
+        <div className="px-2 pb-2">
+          <button
+            onClick={startNewChat}
+            className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm text-white hover:bg-white/10"
+          >
+            <Plus className="h-4 w-4" />
+            <span>New chat</span>
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-3 pb-3">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-white/40" />
+
+            <input
+              value={searchValue}
+              onChange={(event) =>
+                setSearchValue(event.target.value)
+              }
+              placeholder="Search documents"
+              className="w-full rounded-lg border border-white/10 bg-white/[0.06] py-2 pl-9 pr-3 text-xs text-white outline-none placeholder:text-white/35 focus:border-white/20"
+            />
+          </div>
+        </div>
+
+        {/* Navigation */}
+        <div className="px-2">
+          <div className="px-3 pb-1 pt-2 text-[11px] font-medium uppercase tracking-wide text-white/35">
+            Workspace
           </div>
 
-          {selectedDocIds.length >= 2 && (
-            <button
-              onClick={handleCompareDocuments}
-              disabled={isComparing}
-              className="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-500 text-white font-medium text-[11px] shadow-sm flex items-center space-x-1 transition"
-            >
-              <Layers className="w-3 h-3" />
-              <span>{isComparing ? "Comparing..." : "Compare"}</span>
-            </button>
-          )}
+          <button
+            onClick={() => setShowDocuments(false)}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm ${
+              !showDocuments
+                ? "bg-white/10 text-white"
+                : "text-white/65 hover:bg-white/[0.06] hover:text-white"
+            }`}
+          >
+            <MessageSquare className="h-4 w-4" />
+            <span>Chat</span>
+          </button>
+
+          <button
+            onClick={() => setShowDocuments(true)}
+            className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm ${
+              showDocuments
+                ? "bg-white/10 text-white"
+                : "text-white/65 hover:bg-white/[0.06] hover:text-white"
+            }`}
+          >
+            <FileText className="h-4 w-4" />
+            <span>Documents</span>
+            <span className="ml-auto text-[11px] text-white/35">
+              {documents.length}
+            </span>
+          </button>
         </div>
 
-        {/* Documents Scroll Area */}
-        <div className="flex-1 overflow-y-auto p-3 space-y-2">
-          {documents.length === 0 ? (
-            <div className="text-center py-12 px-4">
-              <FileText className="w-8 h-8 text-slate-600 mx-auto mb-2 opacity-60" />
-              <p className="text-xs font-medium text-slate-400">No documents yet</p>
-              <p className="text-[11px] text-slate-500 mt-1">Upload files to start asking questions</p>
-            </div>
-          ) : (
-            documents.map((doc) => {
-              const isSelected = selectedDocIds.includes(doc.id);
-              return (
-                <div
-                  key={doc.id}
-                  onClick={() => toggleDocSelection(doc.id)}
-                  className={`p-3 rounded-xl border transition cursor-pointer select-none ${
-                    isSelected
-                      ? "bg-blue-950/30 border-blue-500/50 shadow-sm shadow-blue-500/10"
-                      : "bg-slate-900/60 border-slate-800/80 hover:border-slate-700"
-                  }`}
+        {/* Chat / Document history */}
+        <div className="min-h-0 flex-1 overflow-y-auto px-2 pt-5">
+          {!showDocuments ? (
+            <>
+              <div className="px-3 pb-2 text-[11px] font-medium uppercase tracking-wide text-white/35">
+                Current chat
+              </div>
+
+              {messages.length > 0 ? (
+                <button
+                  onClick={() => setShowDocuments(false)}
+                  className="flex w-full items-center gap-3 rounded-lg bg-white/[0.06] px-3 py-2.5 text-left text-sm text-white"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="flex items-start space-x-2.5 min-w-0">
-                      <div className="mt-0.5 text-slate-400">
-                        {isSelected ? (
-                          <CheckSquare className="w-4 h-4 text-blue-400" />
-                        ) : (
-                          <Square className="w-4 h-4 text-slate-600" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <h4 className="text-xs font-semibold text-slate-200 truncate" title={doc.original_filename}>
-                          {doc.original_filename}
-                        </h4>
-                        <div className="flex items-center space-x-2 mt-1 text-[10px] text-slate-400">
-                          <span className="uppercase font-mono">{doc.file_type}</span>
-                          <span>•</span>
-                          <span>{(doc.file_size / 1024).toFixed(1)} KB</span>
-                          {doc.page_count > 0 && (
-                            <>
-                              <span>•</span>
-                              <span>{doc.page_count} pg</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                  <MessageSquare className="h-4 w-4 shrink-0 text-white/60" />
 
-                    <div className="flex items-center space-x-1 shrink-0">
-                      <button
-                        onClick={(e) => handleInspectDocument(doc, e)}
-                        title="Inspect extracted chunks"
-                        className="text-slate-500 hover:text-blue-400 p-1 rounded transition opacity-70 hover:opacity-100"
-                      >
-                        <Eye className="w-3.5 h-3.5" />
-                      </button>
-                      <button
-                        onClick={(e) => handleDeleteDocument(doc.id, e)}
-                        title="Delete document"
-                        className="text-slate-500 hover:text-rose-400 p-1 rounded transition opacity-70 hover:opacity-100"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Status Indicator Chip */}
-                  <div className="mt-2.5 flex items-center justify-between text-[10px]">
-                    <div className="flex items-center space-x-1.5">
-                      {doc.status === "READY" && (
-                        <>
-                          <CheckCircle className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-400 font-medium">Ready ({doc.chunk_count} chunks)</span>
-                        </>
-                      )}
-                      {doc.status === "PROCESSING" && (
-                        <>
-                          <RefreshCw className="w-3 h-3 text-amber-400 animate-spin" />
-                          <span className="text-amber-400 font-medium">Processing...</span>
-                        </>
-                      )}
-                      {doc.status === "UPLOADING" && (
-                        <>
-                          <Clock className="w-3 h-3 text-blue-400" />
-                          <span className="text-blue-400 font-medium">Uploading...</span>
-                        </>
-                      )}
-                      {doc.status === "FAILED" && (
-                        <>
-                          <AlertTriangle className="w-3 h-3 text-rose-400" />
-                          <span className="text-rose-400 font-medium truncate" title={doc.error_message}>
-                            Failed
-                          </span>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                  <span className="truncate">
+                    {messages[0].content}
+                  </span>
+                </button>
+              ) : (
+                <div className="px-3 py-2 text-xs leading-5 text-white/35">
+                  Your conversations will appear here.
                 </div>
-              );
-            })
+              )}
+
+              <div className="mt-6 px-3 pb-2 text-[11px] font-medium uppercase tracking-wide text-white/35">
+                Documents
+              </div>
+
+              <div className="space-y-0.5">
+                {filteredDocuments.slice(0, 8).map((document) => (
+                  <button
+                    key={document.id}
+                    onClick={() => toggleDocument(document.id)}
+                    className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-xs ${
+                      selectedDocIds.includes(document.id)
+                        ? "bg-white/10 text-white"
+                        : "text-white/55 hover:bg-white/[0.06] hover:text-white"
+                    }`}
+                  >
+                    <FileText className="h-4 w-4 shrink-0" />
+
+                    <span className="truncate">
+                      {document.original_filename}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between px-3 pb-2">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-white/35">
+                  All documents
+                </span>
+
+                <span className="text-[11px] text-white/30">
+                  {documents.length}
+                </span>
+              </div>
+
+              <div className="space-y-0.5">
+                {filteredDocuments.map((document) => (
+                  <DocumentSidebarItem
+                    key={document.id}
+                    document={document}
+                    selected={selectedDocIds.includes(document.id)}
+                    onSelect={() => toggleDocument(document.id)}
+                    onInspect={(event) =>
+                      handleInspectDocument(document, event)
+                    }
+                    onDelete={(event) =>
+                      handleDeleteDocument(document.id, event)
+                    }
+                  />
+                ))}
+
+                {filteredDocuments.length === 0 && (
+                  <div className="px-3 py-8 text-center text-xs text-white/35">
+                    No documents found.
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
 
-        {/* User Footer */}
-        <div className="p-3 border-t border-slate-800/80 bg-slate-950/60 flex items-center justify-between text-xs">
-          <div className="flex items-center space-x-2 truncate">
-            <div className="h-6 w-6 rounded-full bg-blue-600 flex items-center justify-center text-white text-[10px] font-bold">
-              {user?.full_name ? user.full_name.charAt(0) : "U"}
+        {/* Sidebar bottom */}
+        <div className="border-t border-white/10 p-2">
+          <div className="mb-1 flex items-center gap-3 rounded-lg px-3 py-2.5">
+            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-white/10 text-xs font-medium">
+              {user?.full_name
+                ? user.full_name.charAt(0).toUpperCase()
+                : "U"}
             </div>
-            <span className="text-slate-300 truncate">{user?.email || "User"}</span>
+
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-xs font-medium text-white">
+                {user?.full_name || "User"}
+              </div>
+
+              <div className="truncate text-[10px] text-white/35">
+                {user?.email || ""}
+              </div>
+            </div>
+
+            <button
+              onClick={handleLogout}
+              title="Sign out"
+              className="rounded-md p-1.5 text-white/40 hover:bg-white/10 hover:text-white"
+            >
+              <LogOut className="h-4 w-4" />
+            </button>
           </div>
         </div>
       </aside>
 
-      {/* RIGHT MAIN: AI Chat & Multi-Document RAG */}
-      <main className="flex-1 flex flex-col h-full relative">
-        {/* Chat Header */}
-        <header className="h-14 border-b border-slate-800/80 px-6 flex items-center justify-between bg-slate-950/80 backdrop-blur-md">
-          <div className="flex items-center space-x-3">
-            <MessageSquare className="w-4 h-4 text-blue-400" />
-            <span className="text-sm font-semibold text-slate-200">Grounded Document Q&A</span>
-            <span className="text-xs px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 border border-slate-700">
-              {selectedDocIds.length === 0
-                ? "Searching All Documents"
-                : `Filtered to ${selectedDocIds.length} Document(s)`}
-            </span>
+      {/* MAIN */}
+      <main className="flex min-w-0 flex-1 flex-col bg-white">
+        {/* HEADER */}
+        <header className="flex h-14 shrink-0 items-center justify-between border-b border-black/[0.08] px-3 sm:px-5">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setSidebarOpen((value) => !value)}
+              className="rounded-lg p-2 text-[#6b6b6b] hover:bg-[#f2f2f2] hover:text-[#2f2f2f]"
+            >
+              {sidebarOpen ? (
+                <ChevronLeft className="h-4 w-4" />
+              ) : (
+                <Menu className="h-4 w-4" />
+              )}
+            </button>
+
+            <button
+              onClick={() => setShowDocuments(false)}
+              className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm font-medium hover:bg-[#f5f5f5]"
+            >
+              <span>
+                {showDocuments ? "Documents" : "DocuMind"}
+              </span>
+
+              {!showDocuments && (
+                <ChevronDown className="h-3.5 w-3.5 text-[#8a8a8a]" />
+              )}
+            </button>
           </div>
 
-          <div className="flex items-center space-x-2">
+          <div className="flex items-center gap-1">
             <button
-              onClick={() => setMessages([])}
-              className="text-xs text-slate-400 hover:text-slate-200 px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 transition"
+              title="Settings"
+              className="rounded-lg p-2 text-[#777] hover:bg-[#f2f2f2] hover:text-[#333]"
             >
-              Clear Chat
+              <Settings className="h-4 w-4" />
             </button>
+
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[#ececec] text-[#555]">
+              {user?.full_name ? (
+                <span className="text-xs font-semibold">
+                  {user.full_name.charAt(0).toUpperCase()}
+                </span>
+              ) : (
+                <User className="h-4 w-4" />
+              )}
+            </div>
           </div>
         </header>
 
-        {/* Error Notification Banner */}
+        {/* ERROR */}
         {errorMessage && (
-          <div className="bg-rose-500/10 border-b border-rose-500/20 px-6 py-2.5 text-xs text-rose-400 flex items-center justify-between">
-            <span>{errorMessage}</span>
-            <button onClick={() => setErrorMessage(null)} className="text-rose-400 hover:text-rose-300">
-              <X className="w-3.5 h-3.5" />
+          <div className="border-b border-red-200 bg-red-50 px-4 py-2.5">
+            <div className="mx-auto flex max-w-4xl items-center justify-between gap-3 text-xs text-red-700">
+              <div className="flex items-center gap-2">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                <span>{errorMessage}</span>
+              </div>
+
+              <button
+                onClick={() => setErrorMessage(null)}
+                className="rounded p-1 hover:bg-red-100"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+          </div>
+        )}
+
+        {showDocuments ? (
+          <DocumentsWorkspace
+            documents={filteredDocuments}
+            selectedDocIds={selectedDocIds}
+            isUploading={isUploading}
+            isComparing={isComparing}
+            fileInputRef={fileInputRef}
+            onUpload={() => fileInputRef.current?.click()}
+            onFileUpload={handleFileUpload}
+            onSelect={toggleDocument}
+            onSelectAll={selectAllDocuments}
+            onCompare={handleCompareDocuments}
+            onInspect={handleInspectDocument}
+            onDelete={handleDeleteDocument}
+          />
+        ) : (
+          <ChatWorkspace
+            documents={documents}
+            selectedDocIds={selectedDocIds}
+            messages={messages}
+            inputValue={inputValue}
+            isSending={isSending}
+            copiedIndex={copiedIndex}
+            user={user}
+            inputRef={inputRef}
+            chatBottomRef={chatBottomRef}
+            suggestions={suggestions}
+            onInputChange={setInputValue}
+            onSend={handleSendMessage}
+            onCopy={copyMessage}
+            onCitation={setActiveCitationModal}
+            onRemoveSelected={(id) =>
+              setSelectedDocIds((previous) =>
+                previous.filter((item) => item !== id)
+              )
+            }
+          />
+        )}
+      </main>
+
+      {/* INSPECT MODAL */}
+      {inspectDocModal.doc && (
+        <Modal
+          title={inspectDocModal.doc.original_filename}
+          icon={<FileText className="h-4 w-4" />}
+          onClose={() =>
+            setInspectDocModal({
+              doc: null,
+              chunks: [],
+              loading: false,
+            })
+          }
+        >
+          <div className="mb-5 text-xs text-[#777]">
+            {inspectDocModal.doc.file_type.toUpperCase()} ·{" "}
+            {(inspectDocModal.doc.file_size / 1024).toFixed(1)} KB ·{" "}
+            {inspectDocModal.doc.page_count || 0} pages ·{" "}
+            {inspectDocModal.doc.chunk_count || 0} chunks
+          </div>
+
+          {inspectDocModal.loading ? (
+            <div className="flex items-center justify-center py-16 text-sm text-[#777]">
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
+              Loading extracted content...
+            </div>
+          ) : inspectDocModal.chunks.length === 0 ? (
+            <div className="py-16 text-center text-sm text-[#888]">
+              No indexed chunks found.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {inspectDocModal.chunks.map((chunk) => (
+                <div
+                  key={chunk.id}
+                  className="rounded-xl border border-black/[0.08] bg-[#f7f7f7] p-4"
+                >
+                  <div className="mb-3 flex items-center justify-between border-b border-black/[0.07] pb-2 text-[11px] text-[#777]">
+                    <span className="font-medium text-[#555]">
+                      Chunk {chunk.chunk_index + 1}
+                    </span>
+
+                    <span>
+                      Page {chunk.page_number || 1}
+                    </span>
+                  </div>
+
+                  <p className="whitespace-pre-wrap text-xs leading-6 text-[#444]">
+                    {chunk.text_content}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+        </Modal>
+      )}
+
+      {/* CITATION MODAL */}
+      {activeCitationModal && (
+        <Modal
+          title="Source"
+          icon={<BookOpen className="h-4 w-4" />}
+          onClose={() => setActiveCitationModal(null)}
+        >
+          <div className="mb-1 text-sm font-semibold text-[#222]">
+            {activeCitationModal.document_title}
+          </div>
+
+          <div className="mb-5 text-xs text-[#777]">
+            {activeCitationModal.page_number
+              ? `Page ${activeCitationModal.page_number}`
+              : ""}
+            {activeCitationModal.section_title
+              ? ` · ${activeCitationModal.section_title}`
+              : ""}
+          </div>
+
+          <div className="rounded-xl border border-black/[0.08] bg-[#f7f7f7] p-4">
+            <p className="text-sm leading-6 text-[#444]">
+              “{activeCitationModal.excerpt}”
+            </p>
+          </div>
+        </Modal>
+      )}
+
+      {/* COMPARISON MODAL */}
+      {comparisonModal.open && (
+        <Modal
+          title="Document comparison"
+          icon={<Layers className="h-4 w-4" />}
+          onClose={() =>
+            setComparisonModal({
+              open: false,
+              answer: "",
+              citations: [],
+            })
+          }
+          wide
+        >
+          <div className="whitespace-pre-wrap text-sm leading-7 text-[#3f3f3f]">
+            {comparisonModal.answer}
+          </div>
+
+          {comparisonModal.citations.length > 0 && (
+            <div className="mt-8 border-t border-black/[0.08] pt-5">
+              <div className="mb-3 text-xs font-semibold text-[#555]">
+                Sources
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {comparisonModal.citations.map(
+                  (citation, index) => (
+                    <button
+                      key={index}
+                      onClick={() =>
+                        setActiveCitationModal(citation)
+                      }
+                      className="rounded-lg border border-black/[0.09] bg-[#f7f7f7] px-3 py-2 text-xs text-[#555] hover:bg-[#eeeeee]"
+                    >
+                      {citation.document_title}
+                      {citation.page_number
+                        ? ` · p. ${citation.page_number}`
+                        : ""}
+                    </button>
+                  )
+                )}
+              </div>
+            </div>
+          )}
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* CHAT WORKSPACE */
+/* -------------------------------------------------------------------------- */
+
+function ChatWorkspace({
+  documents,
+  selectedDocIds,
+  messages,
+  inputValue,
+  isSending,
+  copiedIndex,
+  user,
+  inputRef,
+  chatBottomRef,
+  suggestions,
+  onInputChange,
+  onSend,
+  onCopy,
+  onCitation,
+  onRemoveSelected,
+}: {
+  documents: DocumentItem[];
+  selectedDocIds: string[];
+  messages: Message[];
+  inputValue: string;
+  isSending: boolean;
+  copiedIndex: number | null;
+  user: UserType | null;
+  inputRef: React.RefObject<HTMLInputElement>;
+  chatBottomRef: React.RefObject<HTMLDivElement>;
+  suggestions: {
+    title: string;
+    description: string;
+  }[];
+  onInputChange: (value: string) => void;
+  onSend: (prompt?: string) => void;
+  onCopy: (text: string, index: number) => void;
+  onCitation: (citation: Citation) => void;
+  onRemoveSelected: (id: string) => void;
+}) {
+  const hasDocuments = documents.length > 0;
+
+  return (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {/* CHAT CONTENT */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {messages.length === 0 ? (
+          <div className="flex min-h-full flex-col items-center px-4 pb-40 pt-16 sm:pt-24">
+            <div className="mb-5 flex h-12 w-12 items-center justify-center rounded-full bg-[#f1f1f1]">
+              <Sparkles className="h-5 w-5 text-[#444]" />
+            </div>
+
+            <h1 className="text-center text-2xl font-semibold tracking-[-0.02em] text-[#2f2f2f] sm:text-3xl">
+              What can I help you find?
+            </h1>
+
+            <p className="mt-3 max-w-lg text-center text-sm leading-6 text-[#777]">
+              Ask questions about your documents, summarize content,
+              compare files, or find specific clauses and information.
+            </p>
+
+            {!hasDocuments ? (
+              <div className="mt-8 rounded-xl border border-black/[0.08] bg-[#f7f7f7] px-5 py-4 text-center">
+                <FileText className="mx-auto mb-2 h-5 w-5 text-[#777]" />
+
+                <p className="text-sm font-medium text-[#444]">
+                  Upload a document to get started
+                </p>
+
+                <p className="mt-1 text-xs text-[#888]">
+                  PDF, DOCX, TXT and image files are supported.
+                </p>
+              </div>
+            ) : (
+              <div className="mt-9 grid w-full max-w-2xl grid-cols-1 gap-2 sm:grid-cols-2">
+                {suggestions.map((suggestion) => (
+                  <button
+                    key={suggestion.title}
+                    onClick={() => onSend(suggestion.title)}
+                    className="group rounded-xl border border-black/[0.08] bg-white p-4 text-left transition hover:bg-[#f7f7f7]"
+                  >
+                    <div className="text-sm font-medium text-[#333]">
+                      {suggestion.title}
+                    </div>
+
+                    <div className="mt-1 text-xs leading-5 text-[#888]">
+                      {suggestion.description}
+                    </div>
+
+                    <ChevronRight className="mt-3 h-4 w-4 text-[#aaa] transition group-hover:translate-x-0.5 group-hover:text-[#555]" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
+            {messages.map((message, index) => (
+              <MessageRow
+                key={message.id}
+                message={message}
+                index={index}
+                copied={copiedIndex === index}
+                user={user}
+                onCopy={onCopy}
+                onCitation={onCitation}
+              />
+            ))}
+
+            {isSending && (
+              <div className="flex gap-4 py-6">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f0f0f0]">
+                  <Sparkles className="h-4 w-4 text-[#555]" />
+                </div>
+
+                <div className="flex items-center gap-1.5 pt-1">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#888]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#888] [animation-delay:120ms]" />
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#888] [animation-delay:240ms]" />
+                </div>
+              </div>
+            )}
+
+            <div ref={chatBottomRef} />
+          </div>
+        )}
+      </div>
+
+      {/* COMPOSER */}
+      <div className="pointer-events-none absolute bottom-0 left-0 right-0 bg-gradient-to-t from-white via-white to-transparent px-3 pb-3 pt-12 sm:px-6">
+        <div className="pointer-events-auto mx-auto w-full max-w-3xl">
+          {selectedDocIds.length > 0 && (
+            <div className="mb-2 flex flex-wrap gap-1.5">
+              {selectedDocIds.map((id) => {
+                const document = documents.find(
+                  (item) => item.id === id
+                );
+
+                if (!document) return null;
+
+                return (
+                  <button
+                    key={id}
+                    onClick={() => onRemoveSelected(id)}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-black/[0.08] bg-white px-2.5 py-1.5 text-[11px] text-[#555] shadow-sm hover:bg-[#f5f5f5]"
+                  >
+                    <FileText className="h-3 w-3" />
+
+                    <span className="max-w-[150px] truncate">
+                      {document.original_filename}
+                    </span>
+
+                    <X className="h-3 w-3 text-[#999]" />
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              onSend();
+            }}
+            className="relative flex items-end rounded-2xl border border-black/[0.15] bg-white shadow-[0_2px_14px_rgba(0,0,0,0.08)] focus-within:border-black/[0.25]"
+          >
+            <input
+              ref={inputRef}
+              value={inputValue}
+              onChange={(event) =>
+                onInputChange(event.target.value)
+              }
+              disabled={!hasDocuments || isSending}
+              placeholder={
+                hasDocuments
+                  ? "Ask anything about your documents..."
+                  : "Upload a document first..."
+              }
+              className="min-h-[52px] w-full bg-transparent px-4 py-3.5 pr-14 text-sm text-[#2f2f2f] outline-none placeholder:text-[#999] disabled:cursor-not-allowed"
+            />
+
+            <button
+              type="submit"
+              disabled={
+                !inputValue.trim() ||
+                !hasDocuments ||
+                isSending
+              }
+              className="absolute bottom-2 right-2 flex h-9 w-9 items-center justify-center rounded-lg bg-[#2f2f2f] text-white transition hover:bg-[#111] disabled:bg-[#e5e5e5] disabled:text-[#aaa]"
+            >
+              {isSending ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
+              )}
+            </button>
+          </form>
+
+          <div className="pt-2 text-center text-[10px] text-[#999]">
+            DocuMind can make mistakes. Check cited sources for important information.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* MESSAGE */
+/* -------------------------------------------------------------------------- */
+
+function MessageRow({
+  message,
+  index,
+  copied,
+  user,
+  onCopy,
+  onCitation,
+}: {
+  message: Message;
+  index: number;
+  copied: boolean;
+  user: UserType | null;
+  onCopy: (text: string, index: number) => void;
+  onCitation: (citation: Citation) => void;
+}) {
+  const isUser = message.role === "user";
+
+  return (
+    <div
+      className={`flex gap-4 py-6 ${
+        isUser ? "justify-end" : ""
+      }`}
+    >
+      {!isUser && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#f0f0f0]">
+          <Sparkles className="h-4 w-4 text-[#555]" />
+        </div>
+      )}
+
+      <div
+        className={`group max-w-[85%] sm:max-w-[78%] ${
+          isUser ? "order-first" : ""
+        }`}
+      >
+        <div
+          className={`text-sm leading-7 ${
+            isUser
+              ? "rounded-2xl bg-[#f4f4f4] px-4 py-2.5 text-[#333]"
+              : "text-[#333]"
+          }`}
+        >
+          <div className="whitespace-pre-wrap">
+            {message.content}
+          </div>
+        </div>
+
+        {!isUser && (
+          <div className="mt-3 flex items-center gap-1">
+            <button
+              onClick={() => onCopy(message.content, index)}
+              title="Copy"
+              className="rounded-md p-1.5 text-[#999] opacity-0 transition hover:bg-[#f2f2f2] hover:text-[#555] group-hover:opacity-100"
+            >
+              {copied ? (
+                <Check className="h-3.5 w-3.5" />
+              ) : (
+                <Copy className="h-3.5 w-3.5" />
+              )}
             </button>
           </div>
         )}
 
-        {/* Message Stream */}
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          {messages.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-center max-w-xl mx-auto">
-              <div className="h-12 w-12 rounded-2xl bg-gradient-to-tr from-blue-600 via-indigo-500 to-cyan-400 flex items-center justify-center text-white shadow-xl shadow-blue-500/20 mb-4">
-                <Sparkles className="w-6 h-6" />
+        {!isUser &&
+          message.citations &&
+          message.citations.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-[#777]">
+                <BookOpen className="h-3.5 w-3.5" />
+                Sources
               </div>
-              <h2 className="text-lg font-bold text-white">Ask anything about your documents</h2>
-              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
-                DocuMind extracts context with exact page citations, detects cross-contract differences, and answers questions with zero hallucinations.
-              </p>
 
-              {/* Prompt Suggestions */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-6 w-full text-left">
-                {promptSuggestions.map((prompt, idx) => (
+              <div className="flex flex-wrap gap-1.5">
+                {message.citations.map((citation, citationIndex) => (
                   <button
-                    key={idx}
-                    onClick={() => handleSendMessage(prompt)}
-                    className="p-3 rounded-xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-xs text-slate-300 transition text-left flex items-start space-x-2 group"
+                    key={citationIndex}
+                    onClick={() => onCitation(citation)}
+                    className="inline-flex max-w-[230px] items-center gap-2 rounded-lg border border-black/[0.08] bg-[#f8f8f8] px-2.5 py-1.5 text-left text-[11px] text-[#555] hover:bg-[#eeeeee]"
                   >
-                    <ChevronRight className="w-3.5 h-3.5 text-blue-400 group-hover:translate-x-0.5 transition shrink-0 mt-0.5" />
-                    <span>{prompt}</span>
+                    <FileText className="h-3 w-3 shrink-0 text-[#888]" />
+
+                    <span className="truncate">
+                      {citation.document_title}
+                    </span>
+
+                    {citation.page_number && (
+                      <span className="shrink-0 text-[#999]">
+                        p. {citation.page_number}
+                      </span>
+                    )}
                   </button>
                 ))}
               </div>
             </div>
-          ) : (
-            messages.map((msg, mIdx) => (
-              <div
-                key={msg.id}
-                className={`flex gap-3 max-w-3xl ${
-                  msg.role === "user" ? "ml-auto justify-end" : "mr-auto justify-start"
-                }`}
-              >
-                {msg.role === "assistant" && (
-                  <div className="h-7 w-7 rounded-lg bg-blue-600 flex items-center justify-center text-white shrink-0 mt-1 shadow-sm shadow-blue-500/20">
-                    <Sparkles className="w-3.5 h-3.5" />
-                  </div>
-                )}
-
-                <div
-                  className={`rounded-2xl p-4 text-sm leading-relaxed relative group ${
-                    msg.role === "user"
-                      ? "bg-blue-600 text-white shadow-md shadow-blue-600/20 rounded-tr-none"
-                      : "bg-slate-900/90 border border-slate-800 text-slate-200 rounded-tl-none"
-                  }`}
-                >
-                  {/* Copy Button */}
-                  <button
-                    onClick={() => copyToClipboard(msg.content, mIdx)}
-                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 p-1 rounded-md bg-slate-800/80 hover:bg-slate-700 text-slate-400 hover:text-slate-200 transition"
-                    title="Copy to clipboard"
-                  >
-                    {copiedIndex === mIdx ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                  </button>
-
-                  <div className="whitespace-pre-wrap pr-6">{msg.content}</div>
-
-                  {/* Citations list */}
-                  {msg.citations && msg.citations.length > 0 && (
-                    <div className="mt-4 pt-3 border-t border-slate-800/80">
-                      <div className="text-[11px] font-semibold text-slate-400 mb-2 flex items-center gap-1.5">
-                        <BookOpen className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Sources & Citations:</span>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {msg.citations.map((cite, cIdx) => (
-                          <button
-                            key={cIdx}
-                            onClick={() => setActiveCitationModal(cite)}
-                            className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-slate-950 border border-slate-800 hover:border-blue-500/50 text-[11px] text-blue-400 hover:text-blue-300 transition"
-                          >
-                            <span className="font-medium truncate max-w-[140px]">{cite.document_title}</span>
-                            {cite.page_number && (
-                              <span className="text-slate-400">pg. {cite.page_number}</span>
-                            )}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {msg.role === "user" && (
-                  <div className="h-7 w-7 rounded-lg bg-slate-800 flex items-center justify-center text-slate-300 shrink-0 mt-1">
-                    <span className="text-xs font-bold">{user?.full_name ? user.full_name.charAt(0) : "U"}</span>
-                  </div>
-                )}
-              </div>
-            ))
           )}
-          <div ref={chatBottomRef} />
-        </div>
+      </div>
 
-        {/* Input Bar */}
-        <div className="p-4 border-t border-slate-800/80 bg-slate-950/80 backdrop-blur-md">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSendMessage();
-            }}
-            className="max-w-4xl mx-auto relative flex items-center"
-          >
+      {isUser && (
+        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#e7e7e7] text-[#555]">
+          <span className="text-xs font-semibold">
+            {user?.full_name
+              ? user.full_name.charAt(0).toUpperCase()
+              : "U"}
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* DOCUMENTS WORKSPACE */
+/* -------------------------------------------------------------------------- */
+
+function DocumentsWorkspace({
+  documents,
+  selectedDocIds,
+  isUploading,
+  isComparing,
+  fileInputRef,
+  onUpload,
+  onFileUpload,
+  onSelect,
+  onSelectAll,
+  onCompare,
+  onInspect,
+  onDelete,
+}: {
+  documents: DocumentItem[];
+  selectedDocIds: string[];
+  isUploading: boolean;
+  isComparing: boolean;
+  fileInputRef: React.RefObject<HTMLInputElement>;
+  onUpload: () => void;
+  onFileUpload: (event: ChangeEvent<HTMLInputElement>) => void;
+  onSelect: (id: string) => void;
+  onSelectAll: () => void;
+  onCompare: () => void;
+  onInspect: (
+    document: DocumentItem,
+    event: MouseEvent
+  ) => void;
+  onDelete: (
+    documentId: string,
+    event: MouseEvent
+  ) => void;
+}) {
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-8">
+        <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-end">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight text-[#2f2f2f]">
+              Documents
+            </h1>
+
+            <p className="mt-1 text-sm text-[#777]">
+              Upload and manage the documents DocuMind can analyze.
+            </p>
+          </div>
+
+          <div>
             <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              placeholder={
-                documents.length === 0
-                  ? "Upload a document first to start querying..."
-                  : "Ask a question, request a summary, or compare clauses..."
-              }
-              disabled={isSending || documents.length === 0}
-              className="w-full bg-slate-900 border border-slate-800 rounded-2xl pl-5 pr-24 py-3.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition shadow-lg"
+              ref={fileInputRef}
+              type="file"
+              multiple
+              accept=".pdf,.docx,.doc,.txt,.png,.jpg,.jpeg"
+              onChange={onFileUpload}
+              className="hidden"
             />
+
             <button
-              type="submit"
-              disabled={!inputValue.trim() || isSending || documents.length === 0}
-              className="absolute right-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white font-medium text-xs flex items-center space-x-1.5 transition shadow-md shadow-blue-600/20"
+              onClick={onUpload}
+              disabled={isUploading}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#2f2f2f] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#111] disabled:opacity-50"
             >
-              {isSending ? (
-                <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+              {isUploading ? (
+                <RefreshCw className="h-4 w-4 animate-spin" />
               ) : (
-                <>
-                  <span>Send</span>
-                  <Send className="w-3.5 h-3.5" />
-                </>
+                <Upload className="h-4 w-4" />
               )}
-            </button>
-          </form>
-        </div>
-      </main>
 
-      {/* DOCUMENT INSPECTION MODAL */}
-      {inspectDocModal.doc && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl relative">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div>
-                <h3 className="text-base font-bold text-white flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-blue-400" />
-                  {inspectDocModal.doc.original_filename}
-                </h3>
-                <div className="text-xs text-slate-400 mt-0.5">
-                  Format: <span className="uppercase font-mono text-slate-200">{inspectDocModal.doc.file_type}</span> • Size: <span className="text-slate-200">{(inspectDocModal.doc.file_size / 1024).toFixed(1)} KB</span> • Pages: <span className="text-slate-200">{inspectDocModal.doc.page_count}</span>
-                </div>
+              {isUploading
+                ? "Uploading..."
+                : "Upload documents"}
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-8 rounded-2xl border border-black/[0.08] bg-[#fafafa] p-5">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium text-[#444]">
+                Document selection
               </div>
-              <button
-                onClick={() => setInspectDocModal({ doc: null, chunks: [], loading: false })}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
+
+              <div className="mt-1 text-xs text-[#888]">
+                {selectedDocIds.length === 0
+                  ? "All documents will be searched."
+                  : `${selectedDocIds.length} document${
+                      selectedDocIds.length === 1 ? "" : "s"
+                    } selected.`}
+              </div>
             </div>
 
-            <div className="p-6 overflow-y-auto flex-1 space-y-4">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-                Extracted Chunks & Embedding Vectors ({inspectDocModal.chunks.length})
-              </h4>
-              {inspectDocModal.loading ? (
-                <div className="py-8 text-center text-slate-400 text-xs flex items-center justify-center gap-2">
-                  <RefreshCw className="w-4 h-4 animate-spin text-blue-400" />
-                  <span>Loading extracted chunks...</span>
-                </div>
-              ) : inspectDocModal.chunks.length === 0 ? (
-                <div className="py-8 text-center text-slate-500 text-xs">
-                  No indexed chunks found for this document.
-                </div>
-              ) : (
-                inspectDocModal.chunks.map((chunk) => (
-                  <div key={chunk.id} className="p-4 rounded-xl bg-slate-950/80 border border-slate-800 text-xs">
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800/80 text-slate-400 text-[11px]">
-                      <span className="font-mono text-blue-400">Chunk #{chunk.chunk_index + 1}</span>
-                      <span>Page {chunk.page_number || 1}</span>
-                    </div>
-                    <p className="text-slate-300 font-mono text-[11px] leading-relaxed whitespace-pre-wrap">
-                      {chunk.text_content}
-                    </p>
-                  </div>
-                ))
+            <div className="flex gap-2">
+              <button
+                onClick={onSelectAll}
+                className="inline-flex items-center gap-2 rounded-lg border border-black/[0.1] bg-white px-3 py-2 text-xs font-medium text-[#555] hover:bg-[#f2f2f2]"
+              >
+                {selectedDocIds.length === documents.length &&
+                documents.length > 0 ? (
+                  <CheckSquare className="h-3.5 w-3.5" />
+                ) : (
+                  <Square className="h-3.5 w-3.5" />
+                )}
+
+                Select all
+              </button>
+
+              {selectedDocIds.length >= 2 && (
+                <button
+                  onClick={onCompare}
+                  disabled={isComparing}
+                  className="inline-flex items-center gap-2 rounded-lg bg-[#2f2f2f] px-3 py-2 text-xs font-medium text-white hover:bg-[#111] disabled:opacity-50"
+                >
+                  {isComparing ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Layers className="h-3.5 w-3.5" />
+                  )}
+
+                  Compare
+                </button>
               )}
             </div>
-
-            <div className="p-4 border-t border-slate-800 bg-slate-950/50 flex justify-end">
-              <button
-                onClick={() => setInspectDocModal({ doc: null, chunks: [], loading: false })}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-semibold text-slate-200 transition"
-              >
-                Close
-              </button>
-            </div>
           </div>
         </div>
-      )}
 
-      {/* CITATION DETAIL MODAL */}
-      {activeCitationModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl relative">
-            <button
-              onClick={() => setActiveCitationModal(null)}
-              className="absolute right-4 top-4 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
-            >
-              <X className="w-4 h-4" />
-            </button>
+        <div className="mt-5 overflow-hidden rounded-2xl border border-black/[0.08] bg-white">
+          {documents.length === 0 ? (
+            <div className="px-6 py-20 text-center">
+              <FileText className="mx-auto h-8 w-8 text-[#aaa]" />
 
-            <div className="flex items-center space-x-2 text-blue-400 mb-3">
-              <BookOpen className="w-4 h-4" />
-              <span className="text-xs font-semibold uppercase tracking-wider">Citation Reference</span>
+              <h3 className="mt-4 text-sm font-medium text-[#444]">
+                No documents yet
+              </h3>
+
+              <p className="mt-1 text-xs text-[#888]">
+                Upload your first document to begin.
+              </p>
             </div>
-
-            <h3 className="text-base font-semibold text-white mb-1">
-              {activeCitationModal.document_title}
-            </h3>
-            <div className="text-xs text-slate-400 mb-4">
-              {activeCitationModal.page_number && `Page ${activeCitationModal.page_number}`}
-              {activeCitationModal.section_title && ` • Section: ${activeCitationModal.section_title}`}
+          ) : (
+            <div className="divide-y divide-black/[0.07]">
+              {documents.map((document) => (
+                <DocumentRow
+                  key={document.id}
+                  document={document}
+                  selected={selectedDocIds.includes(document.id)}
+                  onSelect={() => onSelect(document.id)}
+                  onInspect={(event) =>
+                    onInspect(document, event)
+                  }
+                  onDelete={(event) =>
+                    onDelete(document.id, event)
+                  }
+                />
+              ))}
             </div>
-
-            <div className="bg-slate-950/80 border border-slate-800/80 rounded-xl p-4 font-mono text-xs text-slate-300 leading-relaxed max-h-60 overflow-y-auto">
-              &quot;{activeCitationModal.excerpt}&quot;
-            </div>
-
-            <div className="mt-5 flex justify-end">
-              <button
-                onClick={() => setActiveCitationModal(null)}
-                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition"
-              >
-                Close
-              </button>
-            </div>
-          </div>
+          )}
         </div>
-      )}
+      </div>
+    </div>
+  );
+}
 
-      {/* MULTI-DOCUMENT COMPARISON MODAL */}
-      {comparisonModal.open && (
-        <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-6">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col shadow-2xl relative">
-            <div className="p-5 border-b border-slate-800 flex items-center justify-between">
-              <div className="flex items-center space-x-2 text-indigo-400">
-                <Layers className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Multi-Document Analysis & Comparison</h3>
+/* -------------------------------------------------------------------------- */
+/* DOCUMENT ROW */
+/* -------------------------------------------------------------------------- */
+
+function DocumentRow({
+  document,
+  selected,
+  onSelect,
+  onInspect,
+  onDelete,
+}: {
+  document: DocumentItem;
+  selected: boolean;
+  onSelect: () => void;
+  onInspect: (event: MouseEvent) => void;
+  onDelete: (event: MouseEvent) => void;
+}) {
+  return (
+    <div
+      onClick={onSelect}
+      className={`group flex cursor-pointer items-center gap-3 px-4 py-3.5 transition hover:bg-[#fafafa] sm:px-5 ${
+        selected ? "bg-[#f7f7f7]" : ""
+      }`}
+    >
+      <button
+        onClick={(event) => {
+          event.stopPropagation();
+          onSelect();
+        }}
+        className="shrink-0 text-[#999]"
+      >
+        {selected ? (
+          <CheckSquare className="h-4 w-4 text-[#444]" />
+        ) : (
+          <Square className="h-4 w-4" />
+        )}
+      </button>
+
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f1f1f1]">
+        <FileText className="h-4 w-4 text-[#666]" />
+      </div>
+
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium text-[#333]">
+          {document.original_filename}
+        </div>
+
+        <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[#999]">
+          <span className="uppercase">
+            {document.file_type}
+          </span>
+
+          <span>·</span>
+
+          <span>
+            {(document.file_size / 1024).toFixed(1)} KB
+          </span>
+
+          {document.page_count > 0 && (
+            <>
+              <span>·</span>
+              <span>{document.page_count} pages</span>
+            </>
+          )}
+        </div>
+      </div>
+
+      <StatusBadge status={document.status} />
+
+      <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+        <button
+          onClick={onInspect}
+          title="Inspect"
+          className="rounded-md p-2 text-[#999] hover:bg-[#eeeeee] hover:text-[#444]"
+        >
+          <Eye className="h-4 w-4" />
+        </button>
+
+        <button
+          onClick={onDelete}
+          title="Delete"
+          className="rounded-md p-2 text-[#999] hover:bg-red-50 hover:text-red-600"
+        >
+          <Trash2 className="h-4 w-4" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* SIDEBAR DOCUMENT */
+/* -------------------------------------------------------------------------- */
+
+function DocumentSidebarItem({
+  document,
+  selected,
+  onSelect,
+  onInspect,
+  onDelete,
+}: {
+  document: DocumentItem;
+  selected: boolean;
+  onSelect: () => void;
+  onInspect: (event: MouseEvent) => void;
+  onDelete: (event: MouseEvent) => void;
+}) {
+  return (
+    <div
+      className={`group flex items-center gap-2 rounded-lg px-3 py-2 ${
+        selected ? "bg-white/10" : "hover:bg-white/[0.06]"
+      }`}
+    >
+      <button
+        onClick={onSelect}
+        className="min-w-0 flex flex-1 items-center gap-3 text-left"
+      >
+        <FileText
+          className={`h-4 w-4 shrink-0 ${
+            selected ? "text-white" : "text-white/40"
+          }`}
+        />
+
+        <span
+          title={document.original_filename}
+          className={`truncate text-xs ${
+            selected ? "text-white" : "text-white/60"
+          }`}
+        >
+          {document.original_filename}
+        </span>
+      </button>
+
+      <button
+        onClick={onInspect}
+        className="hidden rounded p-1 text-white/30 hover:bg-white/10 hover:text-white group-hover:block"
+      >
+        <Eye className="h-3 w-3" />
+      </button>
+
+      <button
+        onClick={onDelete}
+        className="hidden rounded p-1 text-white/30 hover:bg-white/10 hover:text-red-400 group-hover:block"
+      >
+        <Trash2 className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* STATUS */
+/* -------------------------------------------------------------------------- */
+
+function StatusBadge({
+  status,
+}: {
+  status: DocumentItem["status"];
+}) {
+  if (status === "READY") {
+    return (
+      <span className="hidden shrink-0 text-[11px] text-emerald-600 sm:block">
+        Ready
+      </span>
+    );
+  }
+
+  if (status === "PROCESSING") {
+    return (
+      <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-amber-600">
+        <RefreshCw className="h-3 w-3 animate-spin" />
+        <span className="hidden sm:block">Processing</span>
+      </span>
+    );
+  }
+
+  if (status === "UPLOADING") {
+    return (
+      <span className="flex shrink-0 items-center gap-1.5 text-[11px] text-blue-600">
+        <RefreshCw className="h-3 w-3 animate-spin" />
+        <span className="hidden sm:block">Uploading</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="shrink-0 text-[11px] text-red-600">
+      Failed
+    </span>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* MODAL */
+/* -------------------------------------------------------------------------- */
+
+function Modal({
+  title,
+  icon,
+  children,
+  onClose,
+  wide = false,
+}: {
+  title: string;
+  icon?: React.ReactNode;
+  children: React.ReactNode;
+  onClose: () => void;
+  wide?: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4 backdrop-blur-[2px]">
+      <div
+        className={`flex max-h-[88vh] w-full flex-col overflow-hidden rounded-2xl border border-black/[0.1] bg-white shadow-2xl ${
+          wide ? "max-w-4xl" : "max-w-2xl"
+        }`}
+      >
+        <div className="flex shrink-0 items-center justify-between border-b border-black/[0.08] px-5 py-4">
+          <div className="flex min-w-0 items-center gap-2.5">
+            {icon && (
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#f1f1f1] text-[#555]">
+                {icon}
               </div>
-              <button
-                onClick={() => setComparisonModal({ open: false, answer: "", citations: [] })}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+            )}
 
-            <div className="p-6 overflow-y-auto flex-1 text-sm text-slate-200 leading-relaxed whitespace-pre-wrap">
-              {comparisonModal.answer}
-            </div>
-
-            <div className="p-4 border-t border-slate-800 bg-slate-950/50 flex items-center justify-between">
-              <span className="text-xs text-slate-400">
-                {comparisonModal.citations.length} sources analyzed
-              </span>
-              <button
-                onClick={() => setComparisonModal({ open: false, answer: "", citations: [] })}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-xs font-semibold text-white transition shadow-md shadow-blue-600/20"
-              >
-                Done
-              </button>
-            </div>
+            <h2 className="truncate text-sm font-semibold text-[#333]">
+              {title}
+            </h2>
           </div>
+
+          <button
+            onClick={onClose}
+            className="rounded-lg p-1.5 text-[#999] hover:bg-[#f1f1f1] hover:text-[#333]"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
-      )}
+
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
+          {children}
+        </div>
+      </div>
     </div>
   );
 }
