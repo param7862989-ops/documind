@@ -73,6 +73,11 @@ jobs:
           cd frontend
           npm run lint
 
+      - name: Run Frontend Tests
+        run: |
+          cd frontend
+          npm test
+
       - name: Run Next.js Build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1

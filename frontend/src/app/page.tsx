@@ -120,7 +120,7 @@ export default function Home() {
             </h1>
 
             <p className="mt-6 text-base sm:text-lg text-[#666] max-w-2xl mx-auto leading-relaxed">
-              Upload multi-page PDFs, Word contracts, plain text, and scanned documents. Ask questions, compare terms across versions, and receive hallucination-free answers backed by verifiable page-level citations.
+              Upload multi-page PDFs, Word contracts, plain text, and scanned documents. Ask questions, compare terms across versions, and receive grounded, verifiable answers backed by page-level citations.
             </p>
 
             <div className="mt-10 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -131,15 +131,13 @@ export default function Home() {
                 <span>{hasToken ? "Go to Dashboard" : "Get Started Now"}</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
-              <a
-                href="http://localhost:8000/api/v1/docs"
-                target="_blank"
-                rel="noreferrer"
+              <Link
+                href="/dashboard"
                 className="w-full sm:w-auto px-6 py-3 rounded-xl bg-white hover:bg-[#f7f7f7] border border-black/[0.1] text-[#333] font-medium text-sm flex items-center justify-center space-x-2 transition-all duration-200"
               >
                 <Cpu className="w-4 h-4 text-[#777]" />
-                <span>FastAPI Swagger Docs</span>
-              </a>
+                <span>Document Workspace</span>
+              </Link>
             </div>
 
             {/* Live Backend Communication Verification Card */}
