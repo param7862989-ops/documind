@@ -83,6 +83,9 @@ def upgrade() -> None:
     op.create_index(op.f('ix_document_chunks_chunk_index'), 'document_chunks', ['chunk_index'], unique=False)
     op.create_index(op.f('ix_document_chunks_page_number'), 'document_chunks', ['page_number'], unique=False)
 
+    if dialect_name == "postgresql":
+        op.execute(sa.text("CREATE INDEX IF NOT EXISTS ix_document_chunks_embedding_hnsw ON document_chunks USING hnsw (embedding vector_cosine_ops);"))
+
     # 4. conversations table
     op.create_table(
         'conversations',

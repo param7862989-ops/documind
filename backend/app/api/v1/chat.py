@@ -39,11 +39,10 @@ def send_chat_message(
         if not conversation:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail="Conversation not found."
+                detail="Conversation not found or access denied."
             )
 
     if not conversation:
-        # Generate clean title from initial question
         title = payload.content[:45] + ("..." if len(payload.content) > 45 else "")
         conversation = Conversation(
             user_id=current_user.id,
@@ -64,15 +63,15 @@ def send_chat_message(
     db.add(user_msg)
     db.commit()
 
-    # Load recent conversation history
+    # Load recent conversation history (newest 10 messages, ordered chronologically)
     recent_msgs = (
         db.query(Message)
         .filter(Message.conversation_id == conversation.id)
-        .order_by(Message.created_at.asc())
+        .order_by(Message.created_at.desc())
         .limit(10)
         .all()
     )
-    history = [{"role": m.role.value, "content": m.content} for m in recent_msgs]
+    history = [{"role": m.role.value, "content": m.content} for m in reversed(recent_msgs)]
 
     # Target documents
     target_doc_ids = payload.document_ids or conversation.selected_document_ids
@@ -145,7 +144,7 @@ def get_conversation(
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found."
+            detail="Conversation not found or access denied."
         )
     return conversation
 
@@ -157,7 +156,7 @@ def delete_conversation(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Delete a conversation and its messages.
+    Delete a conversation and its messages with ownership verification.
     """
     conversation = (
         db.query(Conversation)
@@ -167,7 +166,7 @@ def delete_conversation(
     if not conversation:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conversation not found."
+            detail="Conversation not found or access denied."
         )
     db.delete(conversation)
     db.commit()
@@ -181,7 +180,8 @@ def compare_documents(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Performs multi-document comparison across selected document IDs.
+    Performs multi-document comparison by retrieving relevant evidence independently
+    from each selected document to prevent any single document from dominating.
     """
     if len(payload.document_ids) < 2:
         raise HTTPException(
@@ -189,19 +189,36 @@ def compare_documents(
             detail="Please select at least two documents to compare."
         )
 
+    # Validate that current user owns all requested documents
+    owned_docs = (
+        db.query(Document.id)
+        .filter(Document.id.in_(payload.document_ids), Document.user_id == current_user.id)
+        .all()
+    )
+    owned_doc_ids = {d[0] for d in owned_docs}
+    if len(owned_doc_ids) != len(payload.document_ids):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="One or more selected documents do not belong to your account."
+        )
+
     query = payload.query or "Compare the main terms, obligations, termination clauses, and key differences."
 
-    retrieved_chunks = rag_service.retrieve_relevant_chunks(
-        db=db,
-        query=query,
-        user_id=current_user.id,
-        document_ids=payload.document_ids,
-        top_k=10
-    )
+    # Independent retrieval per document
+    all_chunks = []
+    for doc_id in payload.document_ids:
+        doc_chunks = rag_service.retrieve_relevant_chunks(
+            db=db,
+            query=query,
+            user_id=current_user.id,
+            document_ids=[doc_id],
+            top_k=4,
+        )
+        all_chunks.extend(doc_chunks)
 
     result = rag_service.generate_grounded_answer(
         query=query,
-        retrieved_chunks=retrieved_chunks,
+        retrieved_chunks=all_chunks,
         is_comparison=True
     )
 

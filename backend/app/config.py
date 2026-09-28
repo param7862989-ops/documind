@@ -34,10 +34,16 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/documind"
 
-    # AI / LLM
+    # AI / LLM / Embeddings
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
+    EMBEDDING_PROVIDER: str = "openai"  # "openai", "local", or "mock"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_DIMENSION: int = 1536
+    RAG_TOP_K: int = 6
+    RAG_SIMILARITY_THRESHOLD: float = 0.20
+    RAG_ENABLE_HYBRID: bool = True
+    RAG_ENABLE_RERANKING: bool = True
 
     # Cloud Object Storage (S3 / MinIO / Cloudflare R2)
     STORAGE_PROVIDER: str = "local"  # "local" or "s3"
@@ -58,6 +64,16 @@ class Settings(BaseSettings):
                 raise ValueError(
                     "CRITICAL SECURITY: In production ENVIRONMENT, SECRET_KEY must be set to a secure, random string at least 32 characters long."
                 )
+        return v
+
+    @field_validator("OPENAI_API_KEY")
+    def validate_openai_api_key(cls, v: str, info) -> str:
+        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        provider = info.data.get("EMBEDDING_PROVIDER", "openai") if info.data else "openai"
+        if env.lower() == "production" and provider == "openai" and not v:
+            raise ValueError(
+                "CRITICAL: In production with EMBEDDING_PROVIDER='openai', OPENAI_API_KEY must be configured."
+            )
         return v
 
     model_config = SettingsConfigDict(
