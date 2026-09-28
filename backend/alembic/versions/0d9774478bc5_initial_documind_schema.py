@@ -53,7 +53,8 @@ def upgrade() -> None:
         sa.Column('file_type', sa.String(length=50), nullable=False),
         sa.Column('file_size', sa.BigInteger(), nullable=False),
         sa.Column('storage_path', sa.String(length=512), nullable=False),
-        sa.Column('status', sa.Enum('UPLOADING', 'PROCESSING', 'READY', 'FAILED', name='documentstatus'), nullable=False),
+        sa.Column('content_hash', sa.String(length=64), nullable=True),
+        sa.Column('status', sa.Enum('UPLOADING', 'QUEUED', 'PROCESSING', 'READY', 'FAILED', name='documentstatus'), nullable=False),
         sa.Column('error_message', sa.Text(), nullable=True),
         sa.Column('page_count', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('chunk_count', sa.Integer(), nullable=False, server_default='0'),
@@ -62,6 +63,7 @@ def upgrade() -> None:
         sa.Column('updated_at', sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index(op.f('ix_documents_user_id'), 'documents', ['user_id'], unique=False)
+    op.create_index(op.f('ix_documents_content_hash'), 'documents', ['content_hash'], unique=False)
     op.create_index(op.f('ix_documents_status'), 'documents', ['status'], unique=False)
 
     # 3. document_chunks table

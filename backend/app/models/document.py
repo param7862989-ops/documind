@@ -49,6 +49,7 @@ from app.core.database import Base
 
 class DocumentStatus(str, Enum):
     UPLOADING = "UPLOADING"
+    QUEUED = "QUEUED"
     PROCESSING = "PROCESSING"
     READY = "READY"
     FAILED = "FAILED"
@@ -64,7 +65,8 @@ class Document(Base):
     file_type = Column(String(50), nullable=False)  # pdf, docx, txt, image
     file_size = Column(BigInteger, nullable=False)  # in bytes
     storage_path = Column(String(512), nullable=False)  # S3 URI or local relative path
-    status = Column(SQLEnum(DocumentStatus), default=DocumentStatus.UPLOADING, nullable=False, index=True)
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA-256 checksum
+    status = Column(SQLEnum(DocumentStatus), default=DocumentStatus.QUEUED, nullable=False, index=True)
     error_message = Column(Text, nullable=True)
     page_count = Column(Integer, default=0, nullable=False)
     chunk_count = Column(Integer, default=0, nullable=False)

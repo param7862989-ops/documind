@@ -8,7 +8,14 @@ from app.config import settings
 
 class BaseStorageService(ABC):
     @abstractmethod
-    def save_file(self, file_obj: BinaryIO, filename: str, content_type: str = "application/octet-stream") -> str:
+    def save_file(
+        self,
+        file_obj: BinaryIO,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        user_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> str:
         """Saves file to storage and returns unique storage path or URI."""
         pass
 
@@ -28,15 +35,29 @@ class LocalStorageService(BaseStorageService):
         self.base_dir = base_dir or settings.LOCAL_STORAGE_DIR
         os.makedirs(self.base_dir, exist_ok=True)
 
-    def save_file(self, file_obj: BinaryIO, filename: str, content_type: str = "application/octet-stream") -> str:
-        ext = os.path.splitext(filename)[1]
-        unique_name = f"{uuid.uuid4().hex}_{filename}"
-        target_path = os.path.join(self.base_dir, unique_name)
-        
+    def save_file(
+        self,
+        file_obj: BinaryIO,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        user_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> str:
+        ext = os.path.splitext(filename)[1].lower()
+        if user_id and document_id:
+            target_dir = os.path.join(self.base_dir, user_id, document_id)
+            target_filename = f"original{ext}"
+        else:
+            target_dir = self.base_dir
+            target_filename = f"{uuid.uuid4().hex}_{filename}"
+
+        os.makedirs(target_dir, exist_ok=True)
+        target_path = os.path.join(target_dir, target_filename)
+
         file_obj.seek(0)
         with open(target_path, "wb") as f:
             shutil.copyfileobj(file_obj, f)
-        
+
         return target_path
 
     def get_file(self, storage_path: str) -> bytes:
@@ -47,8 +68,15 @@ class LocalStorageService(BaseStorageService):
 
     def delete_file(self, storage_path: str) -> bool:
         if os.path.exists(storage_path):
-            os.remove(storage_path)
-            return True
+            try:
+                os.remove(storage_path)
+                # Clean up parent directory if empty
+                parent_dir = os.path.dirname(storage_path)
+                if os.path.exists(parent_dir) and not os.listdir(parent_dir):
+                    os.rmdir(parent_dir)
+                return True
+            except Exception:
+                return False
         return False
 
 
@@ -71,8 +99,20 @@ class S3StorageService(BaseStorageService):
         self.s3_client = session.client(**client_kwargs)
         self.bucket = settings.S3_BUCKET_NAME
 
-    def save_file(self, file_obj: BinaryIO, filename: str, content_type: str = "application/octet-stream") -> str:
-        key = f"uploads/{uuid.uuid4().hex}/{filename}"
+    def save_file(
+        self,
+        file_obj: BinaryIO,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        user_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> str:
+        ext = os.path.splitext(filename)[1].lower()
+        if user_id and document_id:
+            key = f"uploads/{user_id}/{document_id}/original{ext}"
+        else:
+            key = f"uploads/{uuid.uuid4().hex}/{filename}"
+
         file_obj.seek(0)
         self.s3_client.upload_fileobj(
             file_obj,

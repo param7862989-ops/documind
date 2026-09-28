@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     # Cloud Object Storage (S3 / MinIO / Cloudflare R2)
     STORAGE_PROVIDER: str = "local"  # "local" or "s3"
     LOCAL_STORAGE_DIR: str = "./storage/uploads"
+    MAX_FILE_SIZE_MB: int = 50
     S3_BUCKET_NAME: str = "documind-documents"
     S3_REGION: str = "us-east-1"
     S3_ACCESS_KEY: str = ""

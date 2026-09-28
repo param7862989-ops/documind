@@ -15,6 +15,7 @@ class DocumentResponse(DocumentBase):
     id: str
     user_id: str
     storage_path: str
+    content_hash: Optional[str] = None
     status: DocumentStatus
     error_message: Optional[str] = None
     page_count: int

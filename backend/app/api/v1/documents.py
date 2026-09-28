@@ -1,9 +1,13 @@
+import io
 import os
+import uuid
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.core.database import get_db
+from app.core.file_validator import validate_uploaded_file
 from app.models.user import User
 from app.models.document import Document, DocumentStatus, DocumentChunk
 from app.schemas.document import DocumentResponse, DocumentChunkResponse
@@ -12,9 +16,6 @@ from app.services.storage import get_storage_service
 from app.services.ingestion import ingestion_pipeline
 
 router = APIRouter()
-
-ALLOWED_EXTENSIONS = {".pdf", ".docx", ".doc", ".txt", ".md", ".png", ".jpg", ".jpeg"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
@@ -25,52 +26,50 @@ async def upload_document(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Uploads a document to cloud/local storage, creates the document record,
-    and initiates asynchronous background text extraction, chunking, and embedding.
+    Securely uploads a document:
+    1. Validates extension, magic byte header, and maximum file size (streaming).
+    2. Computes content SHA-256 hash.
+    3. Persists file to cloud/local object storage using structured user/doc keys.
+    4. Creates document record with QUEUED status.
+    5. Dispatches non-blocking background ingestion worker.
     """
-    filename = file.filename or "uploaded_document"
-    ext = os.path.splitext(filename)[1].lower()
+    max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
+    content_bytes, safe_filename, file_type, content_hash = await validate_uploaded_file(
+        file=file,
+        max_bytes=max_bytes
+    )
 
-    if ext not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file format '{ext}'. Allowed types: {', '.join(ALLOWED_EXTENSIONS)}"
-        )
-
-    # Read and validate size
-    content = await file.read()
-    file_size = len(content)
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File exceeds maximum allowed size of {MAX_FILE_SIZE // (1024 * 1024)}MB"
-        )
-    if file_size == 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot upload an empty file."
-        )
-
+    doc_id = str(uuid.uuid4())
     storage = get_storage_service()
-    import io
-    storage_path = storage.save_file(io.BytesIO(content), filename, file.content_type or "application/octet-stream")
-
-    # Create document record
-    doc = Document(
+    storage_path = storage.save_file(
+        file_obj=io.BytesIO(content_bytes),
+        filename=safe_filename,
+        content_type=file.content_type or "application/octet-stream",
         user_id=current_user.id,
-        title=filename.rsplit(".", 1)[0],
-        original_filename=filename,
-        file_type=ext.lstrip("."),
-        file_size=file_size,
+        document_id=doc_id,
+    )
+
+    title = safe_filename.rsplit(".", 1)[0]
+    doc = Document(
+        id=doc_id,
+        user_id=current_user.id,
+        title=title,
+        original_filename=safe_filename,
+        file_type=file_type,
+        file_size=len(content_bytes),
         storage_path=storage_path,
-        status=DocumentStatus.UPLOADING,
-        doc_metadata={"content_type": file.content_type},
+        content_hash=content_hash,
+        status=DocumentStatus.QUEUED,
+        doc_metadata={
+            "content_type": file.content_type,
+            "original_filename": safe_filename,
+        },
     )
     db.add(doc)
     db.commit()
     db.refresh(doc)
 
-    # Dispatch non-blocking background ingestion
+    # Dispatch asynchronous background ingestion
     background_tasks.add_task(ingestion_pipeline.process_document, doc.id)
 
     return doc
@@ -129,14 +128,20 @@ def get_document_status(
     Lightweight endpoint for frontend polling of document processing state.
     """
     doc = (
-        db.query(Document.id, Document.status, Document.page_count, Document.chunk_count, Document.error_message)
+        db.query(
+            Document.id,
+            Document.status,
+            Document.page_count,
+            Document.chunk_count,
+            Document.error_message
+        )
         .filter(Document.id == document_id, Document.user_id == current_user.id)
         .first()
     )
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found."
+            detail="Document not found or access denied."
         )
     return {
         "id": doc[0],
@@ -155,7 +160,7 @@ def get_document_chunks(
     current_user: User = Depends(get_current_active_user),
 ):
     """
-    Retrieve extracted chunks and metadata for a specific document.
+    Retrieve extracted chunks and metadata for a specific document with user ownership verification.
     """
     doc = (
         db.query(Document)
@@ -165,7 +170,7 @@ def get_document_chunks(
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found."
+            detail="Document not found or access denied."
         )
 
     chunks = (
@@ -176,6 +181,36 @@ def get_document_chunks(
         .all()
     )
     return chunks
+
+
+@router.post("/{document_id}/retry", response_model=DocumentResponse)
+def retry_document_processing(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_active_user),
+):
+    """
+    Safely re-triggers background ingestion for a failed or stuck document.
+    """
+    doc = (
+        db.query(Document)
+        .filter(Document.id == document_id, Document.user_id == current_user.id)
+        .first()
+    )
+    if not doc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found or access denied."
+        )
+
+    doc.status = DocumentStatus.QUEUED
+    doc.error_message = None
+    db.commit()
+    db.refresh(doc)
+
+    background_tasks.add_task(ingestion_pipeline.process_document, doc.id)
+    return doc
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -195,7 +230,7 @@ def delete_document(
     if not doc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Document not found."
+            detail="Document not found or access denied."
         )
 
     # Delete storage file
