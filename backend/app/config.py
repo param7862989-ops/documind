@@ -48,6 +48,17 @@ class Settings(BaseSettings):
     S3_SECRET_KEY: str = ""
     S3_ENDPOINT_URL: str = ""  # For MinIO or Cloudflare R2
 
+    @field_validator("SECRET_KEY")
+    def validate_secret_key(cls, v: str, info) -> str:
+        # Prevent insecure default secrets in production
+        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        if env.lower() == "production":
+            if not v or "default" in v.lower() or "change_in_production" in v.lower() or len(v) < 32:
+                raise ValueError(
+                    "CRITICAL SECURITY: In production ENVIRONMENT, SECRET_KEY must be set to a secure, random string at least 32 characters long."
+                )
+        return v
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

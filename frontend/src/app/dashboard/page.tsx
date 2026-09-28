@@ -9,7 +9,6 @@ import {
 } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Archive,
   BookOpen,
   Check,
   CheckSquare,
@@ -381,10 +380,6 @@ export default function DashboardPage() {
       .toLowerCase()
       .includes(searchValue.toLowerCase())
   );
-
-  const readyDocuments = documents.filter(
-    (document) => document.status === "READY"
-  ).length;
 
   const suggestions = [
     {

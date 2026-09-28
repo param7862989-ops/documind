@@ -30,6 +30,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Test Alembic Migrations
+        env:
+          DATABASE_URL: sqlite:///./test_documind.db
+          SECRET_KEY: ci_test_jwt_secret_key_32_characters
+          STORAGE_PROVIDER: local
+          ENVIRONMENT: test
+        run: |
+          cd backend
+          alembic upgrade head
+
       - name: Run Backend Pytest Suite
         env:
           DATABASE_URL: sqlite:///./test_documind.db
@@ -57,6 +67,11 @@ jobs:
         run: |
           cd frontend
           npm ci
+
+      - name: Run Lint
+        run: |
+          cd frontend
+          npm run lint
 
       - name: Run Next.js Build
         env:
