@@ -20,19 +20,18 @@ logger = logging.getLogger("documind.app")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Initialize DB schema / pgvector extension
+    # In development/test environments using SQLite, ensure schema is created for convenience.
+    # In production with PostgreSQL, schema is managed exclusively by Alembic migrations.
     try:
-        with engine.connect() as conn:
-            if "postgres" in settings.DATABASE_URL.lower():
-                try:
-                    conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
-                    conn.commit()
-                except Exception as ext_err:
-                    logger.warning("Notice: vector extension check: %s", ext_err)
+        if settings.ENVIRONMENT.lower() != "production" and "sqlite" in settings.DATABASE_URL.lower():
             Base.metadata.create_all(bind=engine)
-            logger.info("Database tables initialized successfully.")
+            logger.info("Development database initialized with Base.metadata.create_all.")
+        else:
+            with engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            logger.info("Database connectivity verified.")
     except Exception as e:
-        logger.error("Database initialization notice (will retry when DB available): %s", e)
+        logger.warning("Database connectivity notice (will retry when DB available): %s", e)
 
     yield
 

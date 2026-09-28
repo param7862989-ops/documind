@@ -112,8 +112,16 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    bind = op.get_bind()
+    dialect_name = bind.dialect.name
+
     op.drop_table('messages')
     op.drop_table('conversations')
     op.drop_table('document_chunks')
     op.drop_table('documents')
     op.drop_table('users')
+
+    if dialect_name == "postgresql":
+        op.execute(sa.text("DROP TYPE IF EXISTS documentstatus;"))
+        op.execute(sa.text("DROP TYPE IF EXISTS messagerole;"))
+

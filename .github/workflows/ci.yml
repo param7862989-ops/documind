@@ -7,22 +7,37 @@ on:
     branches: [ main ]
 
 jobs:
-  backend-tests:
+  backend-verification:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: documind
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgrespassword
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
-      - name: Install system dependencies (Poppler & Tesseract)
+      - name: Install system dependencies (Poppler, Tesseract, PostgreSQL Client)
         run: |
           sudo apt-get update
-          sudo apt-get install -y tesseract-ocr poppler-utils
+          sudo apt-get install -y tesseract-ocr poppler-utils postgresql-client
 
       - name: Install Python dependencies
         run: |
@@ -30,55 +45,69 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Test Alembic Migrations
+      - name: Wait for PostgreSQL and verify pgvector extension
         env:
-          DATABASE_URL: sqlite:///./test_documind.db
-          SECRET_KEY: ci_test_jwt_secret_key_32_characters
+          PGPASSWORD: postgrespassword
+        run: |
+          until pg_isready -h localhost -p 5432 -U postgres; do
+            echo "Waiting for PostgreSQL service..."
+            sleep 1
+          done
+          psql -h localhost -p 5432 -U postgres -d documind -c "CREATE EXTENSION IF NOT EXISTS vector;"
+          psql -h localhost -p 5432 -U postgres -d documind -c "SELECT extname, extversion FROM pg_extension WHERE extname = 'vector';"
+
+      - name: Verify Alembic Migrations (Upgrade -> Downgrade -> Upgrade)
+        env:
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/documind
+          SECRET_KEY: ci_test_jwt_secret_key_32_characters_long_random
           STORAGE_PROVIDER: local
           ENVIRONMENT: test
         run: |
           cd backend
           alembic upgrade head
+          alembic downgrade base
+          alembic upgrade head
 
-      - name: Run Backend Pytest Suite
+      - name: Run Complete Backend Pytest Suite against PostgreSQL + pgvector
         env:
-          DATABASE_URL: sqlite:///./test_documind.db
-          SECRET_KEY: ci_test_jwt_secret_key_32_characters
+          DATABASE_URL: postgresql://postgres:postgrespassword@localhost:5432/documind
+          SECRET_KEY: ci_test_jwt_secret_key_32_characters_long_random
           STORAGE_PROVIDER: local
           ENVIRONMENT: test
+          OPENAI_API_KEY: ""
         run: |
           cd backend
           pytest tests/ -v
 
-  frontend-build:
+  frontend-verification:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install dependencies
+      - name: Install Node dependencies
         run: |
           cd frontend
-          npm ci
+          npm ci --legacy-peer-deps
 
-      - name: Run Lint
+      - name: Run ESLint
         run: |
           cd frontend
           npm run lint
 
-      - name: Run Frontend Tests
+      - name: Run Frontend Vitest Component Tests
         run: |
           cd frontend
           npm test
 
-      - name: Run Next.js Build
+      - name: Run Next.js Production Build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
         run: |

@@ -158,7 +158,7 @@ def test_rag_multi_document_comparison():
 
 
 def test_conversation_memory_ordering():
-    """Verify conversational memory passes recent messages in chronological order."""
+    """Verify conversational memory passes recent messages in chronological order across multiple turns."""
     headers = get_auth_headers("eval_user_5@documind.ai")
 
     files = {"file": ("AlphaCorp_MSA.txt", EVALUATION_DOC_A.encode("utf-8"), "text/plain")}
@@ -183,3 +183,46 @@ def test_conversation_memory_ordering():
     assert res2.status_code == 200
     answer2 = res2.json()["content"]
     assert "1.5%" in answer2
+
+    # Turn 3 with further contextual question
+    res3 = client.post("/api/v1/chat", headers=headers, json={
+        "conversation_id": conv_id,
+        "content": "Which state's law governs this entire agreement?",
+        "document_ids": [doc_id]
+    })
+    assert res3.status_code == 200
+    answer3 = res3.json()["content"]
+    assert "Delaware" in answer3
+
+
+def test_embedding_dimension_and_provider_compatibility():
+    """Verify embedding provider generates valid dense 1536-dimensional vectors."""
+    from app.services.embeddings import embedding_service
+    sample_texts = ["Contract agreement clause", "Payment terms net 30 days"]
+    vectors = embedding_service.get_embeddings(sample_texts)
+    assert len(vectors) == 2
+    for vec in vectors:
+        assert len(vec) == 1536
+        assert isinstance(vec[0], float)
+
+
+def test_citation_metadata_fidelity():
+    """Verify every citation contains authentic document ID, title, and valid excerpt."""
+    headers = get_auth_headers("eval_user_citations@documind.ai")
+    files = {"file": ("AlphaCorp_MSA.txt", EVALUATION_DOC_A.encode("utf-8"), "text/plain")}
+    upload_res = client.post("/api/v1/documents/upload", headers=headers, files=files)
+    doc_id = upload_res.json()["id"]
+    ingestion_pipeline.process_document(doc_id)
+
+    res = client.post("/api/v1/chat", headers=headers, json={
+        "content": "What is the termination notice requirement?",
+        "document_ids": [doc_id]
+    })
+    assert res.status_code == 200
+    citations = res.json()["citations"]
+    assert len(citations) > 0
+    for cit in citations:
+        assert cit["document_id"] == doc_id
+        assert "AlphaCorp_MSA" in cit["document_title"]
+        assert len(cit["excerpt"]) > 0
+
