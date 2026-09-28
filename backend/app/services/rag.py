@@ -350,6 +350,7 @@ class RAGService:
 
         user_prompt = f"DOCUMENT CONTEXT:\n{context_str}\n\nUSER QUESTION:\n{query}"
 
+        start_gen_time = time.time()
         # If OpenAI API is available
         if settings.OPENAI_API_KEY and len(settings.OPENAI_API_KEY.strip()) > 10:
             try:
@@ -369,9 +370,14 @@ class RAGService:
                     temperature=0.1,
                 )
                 answer = completion.choices[0].message.content
+                token_count = completion.usage.total_tokens if completion.usage else int((len(context_str) + len(query) + len(answer)) / 4)
+                latency_ms = round((time.time() - start_gen_time) * 1000, 2)
                 return {
                     "answer": answer,
-                    "citations": citations
+                    "citations": citations,
+                    "token_count": token_count,
+                    "latency_ms": latency_ms,
+                    "model": settings.OPENAI_MODEL,
                 }
             except Exception as e:
                 logger.error("OpenAI chat completion failed: %s", e)
@@ -402,10 +408,16 @@ class RAGService:
                 f"**Citation:** [{doc_title}{page_info}]"
             )
 
+        latency_ms = round((time.time() - start_gen_time) * 1000, 2)
+        token_est = int((len(context_str) + len(query) + len(answer)) / 4)
         return {
             "answer": answer,
-            "citations": citations
+            "citations": citations,
+            "token_count": token_est,
+            "latency_ms": latency_ms,
+            "model": "grounded-deterministic-engine",
         }
 
 
 rag_service = RAGService()
+

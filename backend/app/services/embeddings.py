@@ -1,8 +1,11 @@
 import math
 import re
+import logging
 from abc import ABC, abstractmethod
 from typing import List, Optional
 from app.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class BaseEmbeddingProvider(ABC):
@@ -45,7 +48,7 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
         except Exception as e:
             if settings.ENVIRONMENT == "production":
                 raise RuntimeError(f"OpenAI embedding API call failed in production: {e}") from e
-            print(f"Warning: OpenAI embedding call failed: {e}. Falling back to local semantic provider.")
+            logger.warning("OpenAI embedding call failed: %s. Falling back to local semantic provider.", e)
             return LocalSemanticEmbeddingProvider(dimension=self.dimension).get_embeddings(texts)
 
 

@@ -16,6 +16,8 @@ from app.schemas.chat import (
 )
 from app.api.deps import get_current_active_user
 from app.services.rag import rag_service
+from app.services.ai_usage import ai_usage_service
+from app.config import settings
 
 router = APIRouter()
 
@@ -27,12 +29,9 @@ def send_chat_message(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
-    """
-    Submits a query to the AI RAG engine with conversational memory,
-    retrieves context chunks, and stores the user and assistant turns.
-    Rate limited to 40 queries/minute per user/IP.
-    """
+    # Rate limiting & AI quota guard
     rate_limiter.check(request, action_name="chat_message", max_requests=40, window_seconds=60)
+    ai_usage_service.check_user_quota(user_id=current_user.id, max_daily_operations=settings.AI_QUOTA_PER_USER_DAILY)
 
     # Validate that all requested document IDs belong to current user
     if payload.document_ids and len(payload.document_ids) > 0:
@@ -108,6 +107,16 @@ def send_chat_message(
         query=payload.content,
         retrieved_chunks=retrieved_chunks,
         conversation_history=history
+    )
+
+    # Record AI usage metrics
+    ai_usage_service.record_usage(
+        user_id=current_user.id,
+        operation="chat_message",
+        model=rag_result.get("model", settings.OPENAI_MODEL),
+        token_count=rag_result.get("token_count", 150),
+        latency_ms=rag_result.get("latency_ms", 100.0),
+        status="success"
     )
 
     # Save Assistant Message
@@ -204,6 +213,8 @@ def compare_documents(
     Rate limited to 20 comparisons/minute per user/IP.
     """
     rate_limiter.check(request, action_name="chat_compare", max_requests=20, window_seconds=60)
+    ai_usage_service.check_user_quota(user_id=current_user.id, max_daily_operations=settings.AI_QUOTA_PER_USER_DAILY)
+
     if len(payload.document_ids) < 2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -241,6 +252,16 @@ def compare_documents(
         query=query,
         retrieved_chunks=all_chunks,
         is_comparison=True
+    )
+
+    # Record AI usage metrics
+    ai_usage_service.record_usage(
+        user_id=current_user.id,
+        operation="compare_documents",
+        model=result.get("model", settings.OPENAI_MODEL),
+        token_count=result.get("token_count", 300),
+        latency_ms=result.get("latency_ms", 150.0),
+        status="success"
     )
 
     return result

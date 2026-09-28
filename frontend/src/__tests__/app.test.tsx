@@ -8,7 +8,6 @@ import { ErrorState } from "@/components/common/ErrorState";
 import { DocumentCard } from "@/components/dashboard/DocumentCard";
 import { DocumentList } from "@/components/dashboard/DocumentList";
 import { ChatMessage } from "@/components/dashboard/ChatMessage";
-import { CitationCard } from "@/components/dashboard/CitationCard";
 import { CitationModal } from "@/components/dashboard/CitationModal";
 import { ComparisonView } from "@/components/dashboard/ComparisonView";
 import { ChatInput } from "@/components/dashboard/ChatInput";

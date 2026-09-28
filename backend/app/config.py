@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     RAG_SIMILARITY_THRESHOLD: float = 0.20
     RAG_ENABLE_HYBRID: bool = True
     RAG_ENABLE_RERANKING: bool = True
+    AI_QUOTA_PER_USER_DAILY: int = 200
+    LOG_LEVEL: str = "INFO"
 
     # Cloud Object Storage (S3 / MinIO / Cloudflare R2)
     STORAGE_PROVIDER: str = "local"  # "local" or "s3"

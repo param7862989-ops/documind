@@ -1,6 +1,7 @@
 import io
 import os
 import uuid
+import logging
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
@@ -16,6 +17,7 @@ from app.api.deps import get_current_active_user
 from app.services.storage import get_storage_service
 from app.services.ingestion import ingestion_pipeline
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -243,7 +245,7 @@ def delete_document(
     try:
         storage.delete_file(doc.storage_path)
     except Exception as e:
-        print(f"Warning: Failed to delete storage file {doc.storage_path}: {e}")
+        logger.warning("Failed to delete storage file %s: %s", doc.storage_path, e)
 
     db.delete(doc)
     db.commit()
