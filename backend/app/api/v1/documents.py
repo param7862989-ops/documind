@@ -2,12 +2,13 @@ import io
 import os
 import uuid
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status, UploadFile, File, BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.database import get_db
 from app.core.file_validator import validate_uploaded_file
+from app.core.rate_limiter import rate_limiter
 from app.models.user import User
 from app.models.document import Document, DocumentStatus, DocumentChunk
 from app.schemas.document import DocumentResponse, DocumentChunkResponse
@@ -20,6 +21,7 @@ router = APIRouter()
 
 @router.post("/upload", response_model=DocumentResponse, status_code=status.HTTP_202_ACCEPTED)
 async def upload_document(
+    request: Request,
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -27,12 +29,15 @@ async def upload_document(
 ):
     """
     Securely uploads a document:
-    1. Validates extension, magic byte header, and maximum file size (streaming).
-    2. Computes content SHA-256 hash.
-    3. Persists file to cloud/local object storage using structured user/doc keys.
-    4. Creates document record with QUEUED status.
-    5. Dispatches non-blocking background ingestion worker.
+    1. Rate limits upload frequency (30 uploads/min per user/IP).
+    2. Validates extension, magic byte header, and maximum file size (streaming).
+    3. Computes content SHA-256 hash.
+    4. Persists file to cloud/local object storage using structured user/doc keys.
+    5. Creates document record with QUEUED status.
+    6. Dispatches non-blocking background ingestion worker.
     """
+    rate_limiter.check(request, action_name="documents_upload", max_requests=30, window_seconds=60)
+
     max_bytes = settings.MAX_FILE_SIZE_MB * 1024 * 1024
     content_bytes, safe_filename, file_type, content_hash = await validate_uploaded_file(
         file=file,
@@ -77,8 +82,8 @@ async def upload_document(
 
 @router.get("", response_model=List[DocumentResponse])
 def list_documents(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=100, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):

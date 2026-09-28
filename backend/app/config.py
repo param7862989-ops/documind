@@ -26,10 +26,12 @@ class Settings(BaseSettings):
             return v
         raise ValueError(v)
 
+    RATE_LIMITING_ENABLED: bool = True
+
     # Security & JWT
     SECRET_KEY: str = "documind_default_super_secret_jwt_key_change_in_production_987654321"
     ALGORITHM: str = "HS256"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 7  # 7 days
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24  # 24 hours
 
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/documind"

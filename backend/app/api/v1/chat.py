@@ -1,8 +1,9 @@
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.rate_limiter import rate_limiter
 from app.models.user import User
 from app.models.conversation import Conversation, Message, MessageRole
 from app.models.document import Document
@@ -21,6 +22,7 @@ router = APIRouter()
 
 @router.post("", response_model=MessageResponse)
 def send_chat_message(
+    request: Request,
     payload: MessageCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -28,7 +30,23 @@ def send_chat_message(
     """
     Submits a query to the AI RAG engine with conversational memory,
     retrieves context chunks, and stores the user and assistant turns.
+    Rate limited to 40 queries/minute per user/IP.
     """
+    rate_limiter.check(request, action_name="chat_message", max_requests=40, window_seconds=60)
+
+    # Validate that all requested document IDs belong to current user
+    if payload.document_ids and len(payload.document_ids) > 0:
+        owned_count = (
+            db.query(Document.id)
+            .filter(Document.id.in_(payload.document_ids), Document.user_id == current_user.id)
+            .count()
+        )
+        if owned_count != len(payload.document_ids):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="One or more selected documents do not belong to your account."
+            )
+
     conversation = None
     if payload.conversation_id:
         conversation = (
@@ -108,8 +126,8 @@ def send_chat_message(
 
 @router.get("/conversations", response_model=List[ConversationResponse])
 def list_conversations(
-    skip: int = 0,
-    limit: int = 50,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
 ):
@@ -175,6 +193,7 @@ def delete_conversation(
 
 @router.post("/compare")
 def compare_documents(
+    request: Request,
     payload: CompareRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_active_user),
@@ -182,7 +201,9 @@ def compare_documents(
     """
     Performs multi-document comparison by retrieving relevant evidence independently
     from each selected document to prevent any single document from dominating.
+    Rate limited to 20 comparisons/minute per user/IP.
     """
+    rate_limiter.check(request, action_name="chat_compare", max_requests=20, window_seconds=60)
     if len(payload.document_ids) < 2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

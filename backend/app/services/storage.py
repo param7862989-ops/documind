@@ -35,6 +35,12 @@ class LocalStorageService(BaseStorageService):
         self.base_dir = base_dir or settings.LOCAL_STORAGE_DIR
         os.makedirs(self.base_dir, exist_ok=True)
 
+    def _validate_path_containment(self, path: str):
+        abs_base = os.path.abspath(self.base_dir)
+        abs_target = os.path.abspath(path)
+        if not (abs_target == abs_base or abs_target.startswith(abs_base + os.sep)):
+            raise PermissionError(f"Security: Access to path '{path}' outside base directory is forbidden.")
+
     def save_file(
         self,
         file_obj: BinaryIO,
@@ -43,16 +49,23 @@ class LocalStorageService(BaseStorageService):
         user_id: Optional[str] = None,
         document_id: Optional[str] = None,
     ) -> str:
-        ext = os.path.splitext(filename)[1].lower()
+        # Sanitize filename to prevent directory traversal
+        clean_filename = os.path.basename(filename).strip()
+        ext = os.path.splitext(clean_filename)[1].lower()
         if user_id and document_id:
-            target_dir = os.path.join(self.base_dir, user_id, document_id)
+            # Strip invalid chars from IDs
+            clean_user_id = os.path.basename(user_id)
+            clean_doc_id = os.path.basename(document_id)
+            target_dir = os.path.join(self.base_dir, clean_user_id, clean_doc_id)
             target_filename = f"original{ext}"
         else:
             target_dir = self.base_dir
-            target_filename = f"{uuid.uuid4().hex}_{filename}"
+            target_filename = f"{uuid.uuid4().hex}_{clean_filename}"
 
+        self._validate_path_containment(target_dir)
         os.makedirs(target_dir, exist_ok=True)
         target_path = os.path.join(target_dir, target_filename)
+        self._validate_path_containment(target_path)
 
         file_obj.seek(0)
         with open(target_path, "wb") as f:
@@ -61,12 +74,14 @@ class LocalStorageService(BaseStorageService):
         return target_path
 
     def get_file(self, storage_path: str) -> bytes:
+        self._validate_path_containment(storage_path)
         if not os.path.exists(storage_path):
             raise FileNotFoundError(f"File not found at {storage_path}")
         with open(storage_path, "rb") as f:
             return f.read()
 
     def delete_file(self, storage_path: str) -> bool:
+        self._validate_path_containment(storage_path)
         if os.path.exists(storage_path):
             try:
                 os.remove(storage_path)

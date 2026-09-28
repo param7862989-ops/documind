@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+import re
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 
 
 class UserBase(BaseModel):
@@ -10,7 +11,17 @@ class UserBase(BaseModel):
 
 
 class UserCreate(UserBase):
-    password: str = Field(..., min_length=6, max_length=100)
+    password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("password")
+    def validate_password_strength(cls, v: str) -> str:
+        if len(v.strip()) < 8:
+            raise ValueError("Password must be at least 8 characters long and cannot consist only of whitespace.")
+        if not re.search(r"[A-Za-z]", v):
+            raise ValueError("Password must contain at least one letter.")
+        if not re.search(r"[0-9!@#$%^&*(),.?\":{}|<>]", v):
+            raise ValueError("Password must contain at least one digit or special character.")
+        return v
 
 
 class UserLogin(BaseModel):

@@ -1,11 +1,12 @@
 from datetime import timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.database import get_db
 from app.core.security import get_password_hash, verify_password, create_access_token
+from app.core.rate_limiter import rate_limiter
 from app.models.user import User
 from app.schemas.user import UserCreate, UserResponse, UserLogin
 from app.schemas.token import Token
@@ -15,10 +16,13 @@ router = APIRouter()
 
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
-def register(user_in: UserCreate, db: Session = Depends(get_db)):
+def register(request: Request, user_in: UserCreate, db: Session = Depends(get_db)):
     """
     Register a new user account with hashed password and return access token.
+    Rate limited to 15 registrations per minute per IP.
     """
+    rate_limiter.check(request, action_name="auth_register", max_requests=15, window_seconds=60)
+
     existing_user = db.query(User).filter(User.email == user_in.email.lower()).first()
     if existing_user:
         raise HTTPException(
@@ -49,10 +53,13 @@ def register(user_in: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
-def login(login_data: UserLogin, db: Session = Depends(get_db)):
+def login(request: Request, login_data: UserLogin, db: Session = Depends(get_db)):
     """
     Authenticate user with email and password, returning a JWT access token.
+    Rate limited to 20 login attempts per minute per IP to prevent brute-force attacks.
     """
+    rate_limiter.check(request, action_name="auth_login", max_requests=20, window_seconds=60)
+
     user = db.query(User).filter(User.email == login_data.email.lower()).first()
     if not user or not verify_password(login_data.password, user.hashed_password):
         raise HTTPException(
@@ -80,12 +87,15 @@ def login(login_data: UserLogin, db: Session = Depends(get_db)):
 
 @router.post("/login/oauth", response_model=Token)
 def login_oauth(
+    request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
 ):
     """
     OAuth2 compatible token login for Swagger UI authorization.
     """
+    rate_limiter.check(request, action_name="auth_login_oauth", max_requests=20, window_seconds=60)
+
     user = db.query(User).filter(User.email == form_data.username.lower()).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { FileText, Lock, Mail, ArrowRight, AlertCircle, Loader2, Sparkles } from "lucide-react";
+import { FileText, Lock, Mail, ArrowRight, AlertCircle, Loader2 } from "lucide-react";
 import { loginUser } from "@/lib/api";
 
 export default function LoginPage() {
@@ -37,12 +37,6 @@ export default function LoginPage() {
     performLogin(email, password);
   }
 
-  function handleDemoLogin() {
-    setEmail("founder@documind.ai");
-    setPassword("SecurePassword123!");
-    performLogin("founder@documind.ai", "SecurePassword123!");
-  }
-
   return (
     <div className="min-h-screen bg-[#fafafa] text-[#2f2f2f] flex items-center justify-center p-6 selection:bg-[#171717] selection:text-white">
       <div className="w-full max-w-md relative z-10">
@@ -68,26 +62,6 @@ export default function LoginPage() {
               <span>{error}</span>
             </div>
           )}
-
-          {/* One-Click Demo Sign-in Button */}
-          <button
-            type="button"
-            onClick={handleDemoLogin}
-            disabled={loading}
-            className="w-full mb-5 py-2.5 px-4 rounded-xl bg-[#f7f7f7] hover:bg-[#efefef] border border-black/[0.08] text-[#2f2f2f] text-xs font-semibold flex items-center justify-center space-x-2 transition shadow-sm"
-          >
-            <Sparkles className="w-4 h-4 text-[#171717]" />
-            <span>One-Click Demo Account Sign-In</span>
-          </button>
-
-          <div className="relative mb-5 text-center">
-            <div className="absolute inset-0 flex items-center">
-              <div className="w-full border-t border-black/[0.08]"></div>
-            </div>
-            <span className="relative bg-white px-3 text-[11px] uppercase tracking-wider text-[#999]">
-              Or sign in with email
-            </span>
-          </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -140,24 +114,6 @@ export default function LoginPage() {
               )}
             </button>
           </form>
-
-          {/* Quick Demo Credentials Info */}
-          <div className="mt-5 p-3 rounded-xl bg-[#fafafa] border border-black/[0.06] text-[11px] text-[#666] flex items-center justify-between">
-            <div>
-              <span className="font-semibold text-[#333] block">Demo User:</span>
-              <span className="font-mono text-[10px] text-[#777]">founder@documind.ai</span>
-            </div>
-            <button
-              type="button"
-              onClick={() => {
-                setEmail("founder@documind.ai");
-                setPassword("SecurePassword123!");
-              }}
-              className="text-xs text-[#171717] hover:underline font-semibold"
-            >
-              Fill Credentials
-            </button>
-          </div>
         </div>
 
         <div className="text-center mt-6 text-xs text-[#777]">
