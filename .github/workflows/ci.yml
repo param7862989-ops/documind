@@ -77,7 +77,14 @@ jobs:
           OPENAI_API_KEY: ""
         run: |
           cd backend
-          pytest tests/ -v --tb=short
+          pytest tests/ -v --tb=short 2>&1 | tee pytest_output.log
+
+      - name: Upload Pytest Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-logs
+          path: backend/pytest_output.log
 
   frontend-verification:
     runs-on: ubuntu-latest
@@ -113,4 +120,11 @@ jobs:
           NEXT_TELEMETRY_DISABLED: 1
         run: |
           cd frontend
-          npm run build
+          npm run build 2>&1 | tee build_output.log
+
+      - name: Upload Frontend Build Log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build-logs
+          path: frontend/build_output.log
