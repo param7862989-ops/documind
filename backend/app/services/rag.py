@@ -174,14 +174,15 @@ class RAGService:
                     FROM document_chunks dc
                     JOIN documents d ON dc.document_id = d.id
                     WHERE d.user_id = :user_id
-                      AND dc.document_id = ANY(:doc_ids)
+                      AND dc.embedding IS NOT NULL
+                      AND dc.document_id = ANY(CAST(:doc_ids AS varchar[]))
                     ORDER BY dc.embedding <=> :vec::vector
                     LIMIT :limit_count;
                 """)
                 params = {
                     "vec": vector_str,
                     "user_id": user_id,
-                    "doc_ids": document_ids,
+                    "doc_ids": list(document_ids),
                     "limit_count": top_k * 2,
                 }
             else:
@@ -193,6 +194,7 @@ class RAGService:
                     FROM document_chunks dc
                     JOIN documents d ON dc.document_id = d.id
                     WHERE d.user_id = :user_id
+                      AND dc.embedding IS NOT NULL
                     ORDER BY dc.embedding <=> :vec::vector
                     LIMIT :limit_count;
                 """)
