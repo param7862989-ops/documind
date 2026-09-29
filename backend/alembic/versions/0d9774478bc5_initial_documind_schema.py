@@ -24,10 +24,28 @@ def upgrade() -> None:
 
     if dialect_name == "postgresql":
         op.execute(sa.text("CREATE EXTENSION IF NOT EXISTS vector;"))
+        op.execute(sa.text("""
+            DO $$ BEGIN
+                CREATE TYPE documentstatus AS ENUM ('UPLOADING', 'QUEUED', 'PROCESSING', 'READY', 'FAILED');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """))
+        op.execute(sa.text("""
+            DO $$ BEGIN
+                CREATE TYPE messagerole AS ENUM ('USER', 'ASSISTANT', 'SYSTEM');
+            EXCEPTION
+                WHEN duplicate_object THEN null;
+            END $$;
+        """))
         from pgvector.sqlalchemy import Vector
         vector_col = Vector(1536)
+        doc_status_enum = sa.Enum('UPLOADING', 'QUEUED', 'PROCESSING', 'READY', 'FAILED', name='documentstatus', create_type=False)
+        msg_role_enum = sa.Enum('USER', 'ASSISTANT', 'SYSTEM', name='messagerole', create_type=False)
     else:
         vector_col = sa.Text()
+        doc_status_enum = sa.Enum('UPLOADING', 'QUEUED', 'PROCESSING', 'READY', 'FAILED', name='documentstatus')
+        msg_role_enum = sa.Enum('USER', 'ASSISTANT', 'SYSTEM', name='messagerole')
 
     # 1. users table
     op.create_table(
@@ -54,7 +72,7 @@ def upgrade() -> None:
         sa.Column('file_size', sa.BigInteger(), nullable=False),
         sa.Column('storage_path', sa.String(length=512), nullable=False),
         sa.Column('content_hash', sa.String(length=64), nullable=True),
-        sa.Column('status', sa.Enum('UPLOADING', 'QUEUED', 'PROCESSING', 'READY', 'FAILED', name='documentstatus'), nullable=False),
+        sa.Column('status', doc_status_enum, nullable=False),
         sa.Column('error_message', sa.Text(), nullable=True),
         sa.Column('page_count', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('chunk_count', sa.Integer(), nullable=False, server_default='0'),
@@ -103,7 +121,7 @@ def upgrade() -> None:
         'messages',
         sa.Column('id', sa.String(length=36), primary_key=True, nullable=False),
         sa.Column('conversation_id', sa.String(length=36), sa.ForeignKey('conversations.id', ondelete='CASCADE'), nullable=False),
-        sa.Column('role', sa.Enum('USER', 'ASSISTANT', 'SYSTEM', name='messagerole'), nullable=False),
+        sa.Column('role', msg_role_enum, nullable=False),
         sa.Column('content', sa.Text(), nullable=False),
         sa.Column('citations', sa.JSON(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
@@ -122,6 +140,5 @@ def downgrade() -> None:
     op.drop_table('users')
 
     if dialect_name == "postgresql":
-        op.execute(sa.text("DROP TYPE IF EXISTS documentstatus;"))
-        op.execute(sa.text("DROP TYPE IF EXISTS messagerole;"))
-
+        op.execute(sa.text("DROP TYPE IF EXISTS documentstatus CASCADE;"))
+        op.execute(sa.text("DROP TYPE IF EXISTS messagerole CASCADE;"))

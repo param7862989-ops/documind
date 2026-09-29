@@ -110,6 +110,8 @@ jobs:
       - name: Run Next.js Production Build
         env:
           NEXT_PUBLIC_API_URL: http://localhost:8000/api/v1
+          NEXT_TELEMETRY_DISABLED: 1
+          NODE_ENV: production
         run: |
           cd frontend
           npm run build

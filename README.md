@@ -173,7 +173,7 @@ npm run dev
 cd backend
 pytest tests/ -v
 ```
-- **36 passing tests** verifying:
+- **38 passing tests** verifying:
   - Authentication, Registration, and JWT Security
   - Document Upload, Magic-Byte Validation, and Ingestion Lifecycle
   - OCR Image and Scanned Document Processing
