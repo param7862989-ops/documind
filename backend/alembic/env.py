@@ -20,13 +20,22 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-# Dynamic database URL resolution from environment or application settings
-db_url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+
+def get_db_url() -> str:
+    # Explicitly configured url in context/config takes priority (e.g. test overrides)
+    explicit_url = config.get_main_option("sqlalchemy.url")
+    if explicit_url and "driver://user:pass" not in explicit_url:
+        return explicit_url
+    return os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+
+
+# Dynamic database URL resolution
+db_url = get_db_url()
 config.set_main_option("sqlalchemy.url", db_url)
 
 
 def run_migrations_offline() -> None:
-    url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL or config.get_main_option("sqlalchemy.url")
+    url = get_db_url()
     context.configure(
         url=url,
         target_metadata=target_metadata,
@@ -40,7 +49,7 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     configuration = config.get_section(config.config_ini_section) or {}
-    db_url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL or config.get_main_option("sqlalchemy.url")
+    db_url = get_db_url()
     configuration["sqlalchemy.url"] = db_url
 
     connectable = engine_from_config(
