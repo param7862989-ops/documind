@@ -52,16 +52,53 @@ class GeminiEmbeddingProvider(BaseEmbeddingProvider):
                 output_dimensionality=self.dimension,
             )
 
+            # In google-genai SDK, passing a list of strings directly causes the SDK
+            # to group all strings into a single multi-part Content object (returning 1 combined embedding).
+            # Passing a list of distinct types.Content objects instructs the Gemini API
+            # to generate an embedding for each document in the batch.
+            formatted_contents = [
+                types.Content(parts=[types.Part.from_text(text=t if t.strip() else " ")])
+                for t in texts
+            ]
+
             response = client.models.embed_content(
                 model=self.model,
-                contents=texts,
+                contents=formatted_contents,
                 config=config,
             )
 
             vectors = []
-            for emb in response.embeddings:
-                vec = list(emb.values)
-                vectors.append(vec)
+            if response.embeddings:
+                for emb in response.embeddings:
+                    vec = [float(x) for x in emb.values]
+                    if len(vec) == self.dimension:
+                        vectors.append(vec)
+                    elif len(vec) > self.dimension:
+                        vectors.append(vec[:self.dimension])
+                    else:
+                        vectors.append(vec + [0.0] * (self.dimension - len(vec)))
+
+            # If the response count doesn't match the input count, embed items individually
+            if len(vectors) != len(texts):
+                vectors = []
+                for t in texts:
+                    single_content = types.Content(parts=[types.Part.from_text(text=t if t.strip() else " ")])
+                    single_resp = client.models.embed_content(
+                        model=self.model,
+                        contents=single_content,
+                        config=config,
+                    )
+                    if single_resp.embeddings:
+                        vec = [float(x) for x in single_resp.embeddings[0].values]
+                        if len(vec) == self.dimension:
+                            vectors.append(vec)
+                        elif len(vec) > self.dimension:
+                            vectors.append(vec[:self.dimension])
+                        else:
+                            vectors.append(vec + [0.0] * (self.dimension - len(vec)))
+                    else:
+                        vectors.append([0.0] * self.dimension)
+
             return vectors
 
         except Exception as e:

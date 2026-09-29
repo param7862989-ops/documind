@@ -170,13 +170,13 @@ class RAGService:
                     SELECT dc.id as chunk_id, dc.document_id, dc.chunk_index, dc.page_number,
                            dc.section_title, dc.text_content, dc.chunk_metadata,
                            d.title as document_title,
-                           (1.0 - (dc.embedding <=> :vec::vector)) as vector_score
+                           (1.0 - (dc.embedding <=> CAST(:vec AS vector))) as vector_score
                     FROM document_chunks dc
                     JOIN documents d ON dc.document_id = d.id
                     WHERE d.user_id = :user_id
                       AND dc.embedding IS NOT NULL
                       AND dc.document_id = ANY(CAST(:doc_ids AS varchar[]))
-                    ORDER BY dc.embedding <=> :vec::vector
+                    ORDER BY dc.embedding <=> CAST(:vec AS vector)
                     LIMIT :limit_count;
                 """)
                 params = {
@@ -190,12 +190,12 @@ class RAGService:
                     SELECT dc.id as chunk_id, dc.document_id, dc.chunk_index, dc.page_number,
                            dc.section_title, dc.text_content, dc.chunk_metadata,
                            d.title as document_title,
-                           (1.0 - (dc.embedding <=> :vec::vector)) as vector_score
+                           (1.0 - (dc.embedding <=> CAST(:vec AS vector))) as vector_score
                     FROM document_chunks dc
                     JOIN documents d ON dc.document_id = d.id
                     WHERE d.user_id = :user_id
                       AND dc.embedding IS NOT NULL
-                    ORDER BY dc.embedding <=> :vec::vector
+                    ORDER BY dc.embedding <=> CAST(:vec AS vector)
                     LIMIT :limit_count;
                 """)
                 params = {

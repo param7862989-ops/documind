@@ -75,12 +75,12 @@ def main():
         q_vec = emb_provider.get_embeddings(["How does hybrid RAG work?"])[0]
         assert len(q_vec) == expected_dim, f"Query vector length {len(q_vec)} != expected {expected_dim}"
 
-        print(f"    ✓ Successfully generated 2 chunk vectors + 1 query vector")
-        print(f"    ✓ Output Vector Dimension: {len(vectors[0])} (Matches pgvector schema: Vector(1536))")
-        print(f"    ✓ Embedding Latency:       {(t1 - t0) * 1000:.1f}ms")
+        print(f"    [PASS] Successfully generated 2 chunk vectors + 1 query vector")
+        print(f"    [PASS] Output Vector Dimension: {len(vectors[0])} (Matches pgvector schema: Vector(1536))")
+        print(f"    [PASS] Embedding Latency:       {(t1 - t0) * 1000:.1f}ms")
 
     except Exception as e:
-        print(f"    ✗ Embedding Test FAILED: {e}")
+        print(f"    [FAIL] Embedding Test FAILED: {e}")
         sys.exit(1)
 
     # 3. Test Gemini LLM Text Generation
@@ -106,18 +106,18 @@ def main():
         token_count = res.get("token_count", 0)
         latency_ms = res.get("latency_ms", 0.0)
 
-        print(f"    ✓ Generation Successful")
-        print(f"    ✓ Model:             {res.get('model')}")
-        print(f"    ✓ Token Count:       {token_count}")
-        print(f"    ✓ Server Latency:    {latency_ms:.1f}ms")
-        print(f"    ✓ Response Excerpt:  \"{answer.strip()[:120]}...\"")
+        print(f"    [PASS] Generation Successful")
+        print(f"    [INFO] Model Used:          {res.get('model')}")
+        print(f"    [INFO] Token Count:         {token_count}")
+        print(f"    [INFO] Server Latency:      {latency_ms:.1f}ms")
+        print(f"    [INFO] Response Excerpt:    \"{answer.strip()[:120]}...\"")
 
     except Exception as e:
-        print(f"    ✗ LLM Generation Test FAILED: {e}")
+        print(f"    [FAIL] LLM Generation Test FAILED: {e}")
         sys.exit(1)
 
     print("\n" + "=" * 65)
-    print("  ✓ ALL GEMINI INTEGRATION TESTS PASSED (1536-dim embeddings & LLM)")
+    print("  [SUCCESS] ALL GEMINI INTEGRATION TESTS PASSED (1536-dim embeddings & LLM)")
     print("=" * 65)
 
 

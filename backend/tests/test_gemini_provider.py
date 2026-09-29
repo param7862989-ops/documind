@@ -126,8 +126,43 @@ def test_gemini_embedding_provider_mock_call():
         mock_client.models.embed_content.assert_called_once()
         call_kwargs = mock_client.models.embed_content.call_args.kwargs
         assert call_kwargs["model"] == "gemini-embedding-2"
-        assert call_kwargs["contents"] == texts
+        assert len(call_kwargs["contents"]) == 2
+        assert call_kwargs["contents"][0].parts[0].text == "Text sample 1"
+        assert call_kwargs["contents"][1].parts[0].text == "Text sample 2"
         assert call_kwargs["config"].output_dimensionality == 1536
+
+
+def test_gemini_embedding_provider_batch_recovery_fallback():
+    """Verify GeminiEmbeddingProvider falls back to individual calls if batch returns fewer embeddings."""
+    mock_vector = [0.1] * 1536
+    mock_emb_obj = MagicMock()
+    mock_emb_obj.values = mock_vector
+
+    # First batch call returns only 1 embedding for 2 inputs
+    mock_batch_resp = MagicMock()
+    mock_batch_resp.embeddings = [mock_emb_obj]
+
+    # Subsequent single calls return 1 embedding each
+    mock_single_resp = MagicMock()
+    mock_single_resp.embeddings = [mock_emb_obj]
+
+    mock_client = MagicMock()
+    mock_client.models.embed_content.side_effect = [mock_batch_resp, mock_single_resp, mock_single_resp]
+
+    with patch("google.genai.Client", return_value=mock_client):
+        provider = GeminiEmbeddingProvider(
+            api_key="valid-mock-gemini-key",
+            model="gemini-embedding-2",
+            dimension=1536,
+        )
+
+        texts = ["Text 1", "Text 2"]
+        results = provider.get_embeddings(texts)
+
+        assert len(results) == 2
+        assert len(results[0]) == 1536
+        assert len(results[1]) == 1536
+        assert mock_client.models.embed_content.call_count == 3
 
 
 def test_gemini_query_embedding_mock_call():

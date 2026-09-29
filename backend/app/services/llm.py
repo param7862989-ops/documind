@@ -94,11 +94,41 @@ class GeminiLLMProvider(BaseLLMProvider):
                 temperature=temperature,
             )
 
-            response = client.models.generate_content(
-                model=self.model,
-                contents=contents,
-                config=config,
-            )
+            response = None
+            used_model = self.model
+            candidate_models = [self.model]
+            for alt in [
+                "gemini-3.5-flash-lite",
+                "gemini-3.5-flash",
+                "gemini-3.8-flash",
+                "gemini-3.6-flash",
+                "gemini-3.7-flash",
+                "gemini-flash-latest",
+                "gemini-2.5-flash",
+            ]:
+                if alt not in candidate_models:
+                    candidate_models.append(alt)
+
+            last_err = None
+            for m in candidate_models:
+                try:
+                    response = client.models.generate_content(
+                        model=m,
+                        contents=contents,
+                        config=config,
+                    )
+                    used_model = m
+                    break
+                except Exception as ex:
+                    last_err = ex
+                    err_msg = str(ex)
+                    if any(k in err_msg for k in ("404", "NOT_FOUND", "not found", "503", "UNAVAILABLE", "high demand", "429", "RESOURCE_EXHAUSTED")):
+                        logger.warning("Gemini model %s returned transient error (%s). Trying fallback candidate...", m, ex)
+                        continue
+                    raise
+
+            if response is None and last_err:
+                raise last_err
 
             answer = response.text or ""
             latency_ms = round((time.time() - start_time) * 1000, 2)
@@ -113,7 +143,7 @@ class GeminiLLMProvider(BaseLLMProvider):
                 "answer": answer,
                 "token_count": token_count,
                 "latency_ms": latency_ms,
-                "model": self.model,
+                "model": used_model,
             }
 
         except Exception as e:
