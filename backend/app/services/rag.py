@@ -352,73 +352,59 @@ class RAGService:
 
         user_prompt = f"DOCUMENT CONTEXT:\n{context_str}\n\nUSER QUESTION:\n{query}"
 
-        start_gen_time = time.time()
-        # If OpenAI API is available
-        if settings.OPENAI_API_KEY and len(settings.OPENAI_API_KEY.strip()) > 10:
-            try:
-                from openai import OpenAI
-                client = OpenAI(api_key=settings.OPENAI_API_KEY)
+        # Delegate to configured LLM provider
+        from app.services.llm import get_llm_provider
+        llm_provider = get_llm_provider()
 
-                messages = [{"role": "system", "content": system_prompt}]
-                if conversation_history:
-                    for msg in conversation_history:
-                        messages.append({"role": msg["role"], "content": msg["content"]})
+        try:
+            gen_result = llm_provider.generate_answer(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                conversation_history=conversation_history,
+                temperature=0.1,
+            )
+            answer = gen_result["answer"]
+            token_count = gen_result.get("token_count", 0)
+            latency_ms = gen_result.get("latency_ms", 0.0)
+            model_name = gen_result.get("model", llm_provider.get_model_name())
 
-                messages.append({"role": "user", "content": user_prompt})
-
-                completion = client.chat.completions.create(
-                    model=settings.OPENAI_MODEL,
-                    messages=messages,
-                    temperature=0.1,
+            # Format deterministic fallback comparison table if in fallback mode
+            if is_comparison and "fallback" in model_name.lower():
+                docs = list({c['document_title'] for c in retrieved_chunks})
+                answer = (
+                    f"### Document Comparison Analysis\n\n"
+                    f"Comparison based on {len(docs)} document(s) ({', '.join(docs)}):\n\n"
+                    f"| Document | Key Finding / Provision | Citation |\n"
+                    f"| :--- | :--- | :--- |\n"
                 )
-                answer = completion.choices[0].message.content
-                token_count = completion.usage.total_tokens if completion.usage else int((len(context_str) + len(query) + len(answer)) / 4)
-                latency_ms = round((time.time() - start_gen_time) * 1000, 2)
+                for doc_name in docs:
+                    matching = [c for c in retrieved_chunks if c["document_title"] == doc_name]
+                    sample = self._extract_best_excerpt(matching[0]["text_content"], query, max_chars=140).replace("\n", " ")
+                    page_str = f"Page {matching[0]['page_number']}" if matching[0]['page_number'] is not None else "Section"
+                    answer += f"| **{doc_name}** | {sample} | [{doc_name}, {page_str}] |\n"
+
+            return {
+                "answer": answer,
+                "citations": citations,
+                "token_count": token_count,
+                "latency_ms": latency_ms,
+                "model": model_name,
+            }
+
+        except Exception as e:
+            logger.exception("LLM generation failed: %s", e)
+            if settings.ENVIRONMENT == "production":
+                raise RuntimeError(f"AI Generation Error: {e}") from e
+            if settings.AI_PROVIDER.lower() in ("fallback", "mock"):
+                # Deterministic fallback response for test runner
                 return {
-                    "answer": answer,
+                    "answer": "The provided documents do not contain enough information to answer this question.",
                     "citations": citations,
-                    "token_count": token_count,
-                    "latency_ms": latency_ms,
-                    "model": settings.OPENAI_MODEL,
+                    "token_count": 0,
+                    "latency_ms": 0.0,
+                    "model": "fallback",
                 }
-            except Exception as e:
-                logger.error("OpenAI chat completion failed: %s", e)
-
-        # Grounded Deterministic Fallback Generator
-        if is_comparison:
-            docs = list({c['document_title'] for c in retrieved_chunks})
-            answer = (
-                f"### Document Comparison Analysis\n\n"
-                f"Comparison based on {len(docs)} document(s) ({', '.join(docs)}):\n\n"
-                f"| Document | Key Finding / Provision | Citation |\n"
-                f"| :--- | :--- | :--- |\n"
-            )
-            for doc_name in docs:
-                matching = [c for c in retrieved_chunks if c["document_title"] == doc_name]
-                sample = self._extract_best_excerpt(matching[0]["text_content"], query, max_chars=140).replace("\n", " ")
-                page_str = f"Page {matching[0]['page_number']}" if matching[0]['page_number'] is not None else "Section"
-                answer += f"| **{doc_name}** | {sample} | [{doc_name}, {page_str}] |\n"
-        else:
-            first = retrieved_chunks[0]
-            doc_title = first["document_title"]
-            page_info = f", Page {first['page_number']}" if first['page_number'] is not None else ""
-            section_info = f", Section: {first['section_title']}" if first['section_title'] else ""
-            excerpt = self._extract_best_excerpt(first["text_content"], query, max_chars=280)
-            answer = (
-                f"Based on **{doc_title}**{page_info}{section_info}:\n\n"
-                f"{excerpt}\n\n"
-                f"**Citation:** [{doc_title}{page_info}]"
-            )
-
-        latency_ms = round((time.time() - start_gen_time) * 1000, 2)
-        token_est = int((len(context_str) + len(query) + len(answer)) / 4)
-        return {
-            "answer": answer,
-            "citations": citations,
-            "token_count": token_est,
-            "latency_ms": latency_ms,
-            "model": "grounded-deterministic-engine",
-        }
+            raise RuntimeError(f"AI Generation Error: {e}") from e
 
 
 rag_service = RAGService()

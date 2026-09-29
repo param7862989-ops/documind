@@ -9,6 +9,8 @@ logger = logging.getLogger(__name__)
 
 
 class BaseEmbeddingProvider(ABC):
+    """Abstract interface for dense vector embedding generators."""
+
     @abstractmethod
     def get_embeddings(self, texts: List[str]) -> List[List[float]]:
         pass
@@ -18,7 +20,60 @@ class BaseEmbeddingProvider(ABC):
         pass
 
 
+class GeminiEmbeddingProvider(BaseEmbeddingProvider):
+    """Official Google GenAI SDK embedding provider for Gemini embedding models."""
+
+    def __init__(self, api_key: str, model: str = "gemini-embedding-2", dimension: int = 1536):
+        self.api_key = api_key
+        self.model = model
+        self.dimension = dimension
+
+    def get_dimension(self) -> int:
+        return self.dimension
+
+    def get_embeddings(self, texts: List[str]) -> List[List[float]]:
+        if not texts:
+            return []
+
+        if not self.api_key or len(self.api_key.strip()) < 5:
+            if settings.ENVIRONMENT == "production":
+                raise RuntimeError("GEMINI_API_KEY is missing or invalid in production.")
+            # Fall back to local semantic provider in offline development/test
+            logger.info("GEMINI_API_KEY not set in %s mode. Using local semantic embedding provider.", settings.ENVIRONMENT)
+            return LocalSemanticEmbeddingProvider(dimension=self.dimension).get_embeddings(texts)
+
+        try:
+            from google import genai
+            from google.genai import types
+
+            client = genai.Client(api_key=self.api_key)
+
+            config = types.EmbedContentConfig(
+                output_dimensionality=self.dimension,
+            )
+
+            response = client.models.embed_content(
+                model=self.model,
+                contents=texts,
+                config=config,
+            )
+
+            vectors = []
+            for emb in response.embeddings:
+                vec = list(emb.values)
+                vectors.append(vec)
+            return vectors
+
+        except Exception as e:
+            if settings.ENVIRONMENT == "production":
+                raise RuntimeError(f"Gemini embedding API call failed in production: {e}") from e
+            logger.warning("Gemini embedding call failed: %s. Falling back to local semantic provider.", e)
+            return LocalSemanticEmbeddingProvider(dimension=self.dimension).get_embeddings(texts)
+
+
 class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
+    """OpenAI API embedding provider for text-embedding models."""
+
     def __init__(self, api_key: str, model: str = "text-embedding-3-small", dimension: int = 1536):
         self.api_key = api_key
         self.model = model
@@ -56,7 +111,7 @@ class LocalSemanticEmbeddingProvider(BaseEmbeddingProvider):
     """
     Genuine zero-external-API local semantic dense encoder.
     Uses subword character-trigram and positional token projection matrices
-    with L2-normalization to produce consistent, non-random semantic vectors.
+    with L2-normalization to produce consistent, non-random 1536-dimensional semantic vectors.
     """
     def __init__(self, dimension: int = 1536):
         self.dimension = dimension
@@ -106,10 +161,18 @@ class LocalSemanticEmbeddingProvider(BaseEmbeddingProvider):
 
 
 class EmbeddingService:
+    """High-level embedding service dispatching to configured provider."""
+
     def __init__(self):
         provider_name = settings.EMBEDDING_PROVIDER.lower()
-        if provider_name == "openai":
-            self.provider: BaseEmbeddingProvider = OpenAIEmbeddingProvider(
+        if provider_name == "gemini":
+            self.provider: BaseEmbeddingProvider = GeminiEmbeddingProvider(
+                api_key=settings.GEMINI_API_KEY,
+                model=settings.GEMINI_EMBEDDING_MODEL,
+                dimension=settings.EMBEDDING_DIMENSION,
+            )
+        elif provider_name == "openai":
+            self.provider = OpenAIEmbeddingProvider(
                 api_key=settings.OPENAI_API_KEY,
                 model=settings.EMBEDDING_MODEL,
                 dimension=settings.EMBEDDING_DIMENSION,

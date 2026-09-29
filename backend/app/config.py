@@ -36,12 +36,24 @@ class Settings(BaseSettings):
     # Database
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost:5432/documind"
 
-    # AI / LLM / Embeddings
+    # AI Provider Selection ("gemini", "openai", "fallback", "mock")
+    AI_PROVIDER: str = "gemini"
+
+    # Google Gemini Configuration
+    GEMINI_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    GEMINI_EMBEDDING_MODEL: str = "gemini-embedding-2"
+
+    # OpenAI Configuration (Retained for backward compatibility)
     OPENAI_API_KEY: str = ""
     OPENAI_MODEL: str = "gpt-4o-mini"
-    EMBEDDING_PROVIDER: str = "openai"  # "openai", "local", or "mock"
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # Embeddings Configuration ("gemini", "openai", "local", "mock")
+    EMBEDDING_PROVIDER: str = "gemini"
+    EMBEDDING_MODEL: str = "gemini-embedding-2"
     EMBEDDING_DIMENSION: int = 1536
+
+    # RAG Search & Ranking Parameters
     RAG_TOP_K: int = 6
     RAG_SIMILARITY_THRESHOLD: float = 0.20
     RAG_ENABLE_HYBRID: bool = True
@@ -70,13 +82,25 @@ class Settings(BaseSettings):
                 )
         return v
 
+    @field_validator("GEMINI_API_KEY")
+    def validate_gemini_api_key(cls, v: str, info) -> str:
+        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        ai_provider = info.data.get("AI_PROVIDER", "gemini") if info.data else "gemini"
+        emb_provider = info.data.get("EMBEDDING_PROVIDER", "gemini") if info.data else "gemini"
+        if env.lower() == "production" and (ai_provider.lower() == "gemini" or emb_provider.lower() == "gemini") and not v:
+            raise ValueError(
+                "CRITICAL: In production with Gemini configured as AI_PROVIDER or EMBEDDING_PROVIDER, GEMINI_API_KEY must be configured."
+            )
+        return v
+
     @field_validator("OPENAI_API_KEY")
     def validate_openai_api_key(cls, v: str, info) -> str:
         env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
-        provider = info.data.get("EMBEDDING_PROVIDER", "openai") if info.data else "openai"
-        if env.lower() == "production" and provider == "openai" and not v:
+        ai_provider = info.data.get("AI_PROVIDER", "gemini") if info.data else "gemini"
+        emb_provider = info.data.get("EMBEDDING_PROVIDER", "gemini") if info.data else "gemini"
+        if env.lower() == "production" and (ai_provider.lower() == "openai" or emb_provider.lower() == "openai") and not v:
             raise ValueError(
-                "CRITICAL: In production with EMBEDDING_PROVIDER='openai', OPENAI_API_KEY must be configured."
+                "CRITICAL: In production with OpenAI configured as AI_PROVIDER or EMBEDDING_PROVIDER, OPENAI_API_KEY must be configured."
             )
         return v
 

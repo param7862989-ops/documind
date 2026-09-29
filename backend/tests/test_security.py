@@ -244,5 +244,8 @@ def test_production_secret_key_validation():
         Settings(
             ENVIRONMENT="production",
             SECRET_KEY="documind_default_super_secret_jwt_key_change_in_production_987654321",
-            OPENAI_API_KEY="sk-fake-openai-key-for-test"
+            AI_PROVIDER="openai",
+            EMBEDDING_PROVIDER="openai",
+            OPENAI_API_KEY="sk-fake-openai-key-for-test",
+            GEMINI_API_KEY="fake-gemini-key-for-test",
         )

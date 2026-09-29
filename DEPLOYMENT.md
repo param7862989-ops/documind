@@ -63,10 +63,14 @@ Set the following environment variables in your cloud backend service (Render, R
 | `S3_ACCESS_KEY` | If s3 | IAM / R2 Access Key | `AKIA...` |
 | `S3_SECRET_KEY` | If s3 | IAM / R2 Secret Key | `...` |
 | `S3_ENDPOINT_URL` | Optional | Custom S3 URL (for R2/MinIO) | `https://<account_id>.r2.cloudflarestorage.com` |
-| `OPENAI_API_KEY` | Yes | OpenAI API Key | `sk-proj-...` |
+| `AI_PROVIDER` | No | AI provider (`gemini` or `openai`) | `gemini` |
+| `GEMINI_API_KEY` | If gemini | Google Gemini API Key | `AIza...` |
+| `GEMINI_MODEL` | No | Gemini text model | `gemini-2.5-flash` |
+| `GEMINI_EMBEDDING_MODEL` | No | Gemini embedding model | `gemini-embedding-2` |
+| `OPENAI_API_KEY` | If openai | OpenAI API Key | `sk-proj-...` |
 | `OPENAI_MODEL` | No | Chat completion model | `gpt-4o-mini` |
-| `EMBEDDING_PROVIDER` | No | Embedding provider | `openai` |
-| `EMBEDDING_MODEL` | No | Embedding model | `text-embedding-3-small` |
+| `EMBEDDING_PROVIDER` | No | Embedding provider (`gemini`/`openai`)| `gemini` |
+| `EMBEDDING_DIMENSION` | No | Embedding vector dimension | `1536` |
 | `AI_QUOTA_PER_USER_DAILY`| No | Max AI queries/user/day | `200` |
 | `RATE_LIMITING_ENABLED` | No | Enable sliding window limits | `true` |
 
