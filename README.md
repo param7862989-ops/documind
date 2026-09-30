@@ -174,7 +174,7 @@ python scripts/verify_gemini.py
 cd backend
 pytest tests/ -v
 ```
-- **46 passing tests** verifying:
+- **50 passing tests** verifying:
   - Google Gemini LLM & 1536-dimensional Embedding Provider Suite
   - Authentication, Registration, and JWT Security
   - Document Upload, Magic-Byte Validation, and Ingestion Lifecycle
