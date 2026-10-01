@@ -101,12 +101,14 @@ class S3StorageService(BaseStorageService):
         from botocore.config import Config
 
         session = boto3.session.Session()
+        addressing_style = "path" if settings.S3_ENDPOINT_URL else "auto"
+        region = settings.S3_REGION or "auto"
         client_kwargs = {
             "service_name": "s3",
-            "region_name": settings.S3_REGION,
+            "region_name": region,
             "aws_access_key_id": settings.S3_ACCESS_KEY,
             "aws_secret_access_key": settings.S3_SECRET_KEY,
-            "config": Config(s3={"addressing_style": "virtual"}),
+            "config": Config(s3={"addressing_style": addressing_style}, signature_version="s3v4"),
         }
         if settings.S3_ENDPOINT_URL:
             client_kwargs["endpoint_url"] = settings.S3_ENDPOINT_URL
@@ -163,6 +165,6 @@ class S3StorageService(BaseStorageService):
 
 
 def get_storage_service() -> BaseStorageService:
-    if settings.STORAGE_PROVIDER.lower() == "s3" and settings.S3_ACCESS_KEY:
+    if settings.STORAGE_PROVIDER.lower() in ("s3", "r2", "cloudflare") and settings.S3_ACCESS_KEY:
         return S3StorageService()
     return LocalStorageService()

@@ -118,8 +118,70 @@ def test_ai_usage_service_metrics_and_quota():
     assert "429" in str(excinfo.value) or "quota" in str(excinfo.value).lower()
 
 
+from app.services.storage import S3StorageService, LocalStorageService, get_storage_service
+
+
+def test_storage_service_provider_selection():
+    """Verify get_storage_service resolves correctly for s3, r2, cloudflare, and local providers."""
+    # Test s3 provider selection
+    with patch.object(settings, "STORAGE_PROVIDER", "s3"), patch.object(settings, "S3_ACCESS_KEY", "key"):
+        service = get_storage_service()
+        assert isinstance(service, S3StorageService)
+
+    # Test r2 provider selection
+    with patch.object(settings, "STORAGE_PROVIDER", "r2"), patch.object(settings, "S3_ACCESS_KEY", "key"):
+        service = get_storage_service()
+        assert isinstance(service, S3StorageService)
+
+    # Test cloudflare provider selection
+    with patch.object(settings, "STORAGE_PROVIDER", "cloudflare"), patch.object(settings, "S3_ACCESS_KEY", "key"):
+        service = get_storage_service()
+        assert isinstance(service, S3StorageService)
+
+    # Test fallback to LocalStorageService when provider is local or access key is missing
+    with patch.object(settings, "STORAGE_PROVIDER", "local"), patch.object(settings, "S3_ACCESS_KEY", ""):
+        service = get_storage_service()
+        assert isinstance(service, LocalStorageService)
+
+
+def test_s3_storage_service_r2_endpoint_and_addressing_config():
+    """Verify S3StorageService applies path addressing for custom endpoints and auto addressing otherwise."""
+    with patch("boto3.session.Session") as mock_session:
+        mock_client = MagicMock()
+        mock_session.return_value.client.return_value = mock_client
+
+        # Scenario 1: Cloudflare R2 custom endpoint -> path addressing & s3v4 signature
+        with patch.object(settings, "STORAGE_PROVIDER", "s3"), \
+             patch.object(settings, "S3_ACCESS_KEY", "mock_key"), \
+             patch.object(settings, "S3_SECRET_KEY", "mock_secret"), \
+             patch.object(settings, "S3_REGION", "auto"), \
+             patch.object(settings, "S3_ENDPOINT_URL", "https://acc-123.r2.cloudflarestorage.com"):
+
+            s3 = S3StorageService()
+            call_kwargs = mock_session.return_value.client.call_args[1]
+            assert call_kwargs["endpoint_url"] == "https://acc-123.r2.cloudflarestorage.com"
+            assert call_kwargs["region_name"] == "auto"
+            assert call_kwargs["config"].s3["addressing_style"] == "path"
+            assert call_kwargs["config"].signature_version == "s3v4"
+
+        # Scenario 2: Standard AWS S3 (no endpoint_url) -> auto addressing & s3v4 signature
+        mock_session.return_value.client.reset_mock()
+        with patch.object(settings, "STORAGE_PROVIDER", "s3"), \
+             patch.object(settings, "S3_ACCESS_KEY", "mock_key"), \
+             patch.object(settings, "S3_SECRET_KEY", "mock_secret"), \
+             patch.object(settings, "S3_REGION", "us-east-1"), \
+             patch.object(settings, "S3_ENDPOINT_URL", ""):
+
+            s3 = S3StorageService()
+            call_kwargs = mock_session.return_value.client.call_args[1]
+            assert "endpoint_url" not in call_kwargs
+            assert call_kwargs["region_name"] == "us-east-1"
+            assert call_kwargs["config"].s3["addressing_style"] == "auto"
+            assert call_kwargs["config"].signature_version == "s3v4"
+
+
 def test_s3_storage_service_abstraction():
-    """Verify S3StorageService operations with mocked boto3 client."""
+    """Verify S3StorageService operations (save, get, delete) with mocked boto3 client."""
     with patch("boto3.session.Session") as mock_session:
         mock_client = MagicMock()
         mock_session.return_value.client.return_value = mock_client
