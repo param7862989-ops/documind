@@ -25,8 +25,16 @@ def get_db_url() -> str:
     # Explicitly configured url in context/config takes priority (e.g. test overrides)
     explicit_url = config.get_main_option("sqlalchemy.url")
     if explicit_url and "driver://user:pass" not in explicit_url:
-        return explicit_url
-    return os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+        url = explicit_url
+    else:
+        url = os.environ.get("DATABASE_URL") or settings.DATABASE_URL
+    
+    # Normalize PostgreSQL driver URL for SQLAlchemy 2.0 compatibility
+    if url.startswith("postgres://"):
+        url = url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif url.startswith("postgresql://") and not url.startswith("postgresql+"):
+        url = url.replace("postgresql://", "postgresql+psycopg2://", 1)
+    return url
 
 
 # Dynamic database URL resolution
