@@ -164,7 +164,154 @@ class S3StorageService(BaseStorageService):
         return True
 
 
+class SupabaseStorageService(BaseStorageService):
+    def __init__(self):
+        import httpx
+        if not settings.SUPABASE_URL or not settings.SUPABASE_SERVICE_ROLE_KEY:
+            raise ValueError(
+                "SupabaseStorageService requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY to be configured."
+            )
+        self.supabase_url = settings.SUPABASE_URL.rstrip("/")
+        self.service_role_key = settings.SUPABASE_SERVICE_ROLE_KEY
+        self.bucket = (settings.SUPABASE_STORAGE_BUCKET or "documind-documents").strip()
+        self.headers = {
+            "apikey": self.service_role_key,
+            "Authorization": f"Bearer {self.service_role_key}",
+        }
+        self.timeout = httpx.Timeout(30.0, connect=10.0)
+
+    def _parse_and_validate_uri(self, storage_path: str) -> str:
+        """
+        Parses and strictly validates a Supabase storage URI.
+        Expected format: supabase://<bucket>/<object_key>
+        Validates:
+        - Scheme must be supabase://
+        - Bucket matches configured bucket
+        - Key contains no path traversal (..) or invalid segments
+        """
+        if not storage_path.startswith("supabase://"):
+            raise ValueError(f"Invalid Supabase storage URI scheme: '{storage_path}'. Expected 'supabase://'")
+
+        path_without_scheme = storage_path[len("supabase://"):]
+        if "/" not in path_without_scheme:
+            raise ValueError(f"Malformed Supabase storage URI: '{storage_path}'. Missing key.")
+
+        bucket, key = path_without_scheme.split("/", 1)
+        if bucket != self.bucket:
+            raise ValueError(
+                f"Security: Storage bucket mismatch. URI bucket '{bucket}' does not match configured '{self.bucket}'."
+            )
+
+        key = key.strip()
+        if not key or ".." in key or key.startswith("/"):
+            raise ValueError(f"Security: Invalid or unsafe object key in URI: '{storage_path}'")
+
+        return key
+
+    def save_file(
+        self,
+        file_obj: BinaryIO,
+        filename: str,
+        content_type: str = "application/octet-stream",
+        user_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+    ) -> str:
+        import httpx
+        import urllib.parse
+
+        # Sanitize filename and construct key
+        clean_filename = os.path.basename(filename).strip()
+        ext = os.path.splitext(clean_filename)[1].lower()
+        if user_id and document_id:
+            clean_user_id = os.path.basename(user_id).strip()
+            clean_doc_id = os.path.basename(document_id).strip()
+            key = f"uploads/{clean_user_id}/{clean_doc_id}/original{ext}"
+        else:
+            key = f"uploads/{uuid.uuid4().hex}/{clean_filename}"
+
+        # URL encode path segments safely
+        encoded_key = "/".join(urllib.parse.quote(seg, safe="") for seg in key.split("/"))
+        encoded_bucket = urllib.parse.quote(self.bucket, safe="")
+
+        file_obj.seek(0)
+        file_bytes = file_obj.read()
+
+        url = f"{self.supabase_url}/storage/v1/object/{encoded_bucket}/{encoded_key}"
+        upload_headers = {
+            **self.headers,
+            "Content-Type": content_type or "application/octet-stream",
+            "x-upsert": "true",
+        }
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.post(url, headers=upload_headers, content=file_bytes)
+                if resp.status_code not in (200, 201):
+                    raise RuntimeError(
+                        f"Supabase storage upload failed with status {resp.status_code}."
+                    )
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Supabase storage upload timed out: {e}") from e
+        except Exception as e:
+            if not isinstance(e, (RuntimeError, TimeoutError)):
+                raise RuntimeError(f"Supabase storage upload error: {type(e).__name__}") from e
+            raise
+
+        return f"supabase://{self.bucket}/{key}"
+
+    def get_file(self, storage_path: str) -> bytes:
+        import httpx
+        import urllib.parse
+
+        key = self._parse_and_validate_uri(storage_path)
+        encoded_key = "/".join(urllib.parse.quote(seg, safe="") for seg in key.split("/"))
+        encoded_bucket = urllib.parse.quote(self.bucket, safe="")
+
+        url = f"{self.supabase_url}/storage/v1/object/authenticated/{encoded_bucket}/{encoded_key}"
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.get(url, headers=self.headers)
+                if resp.status_code == 404:
+                    raise FileNotFoundError(f"File not found in Supabase storage: {storage_path}")
+                if resp.status_code != 200:
+                    raise RuntimeError(
+                        f"Supabase storage download failed with status {resp.status_code}."
+                    )
+                return resp.content
+        except httpx.TimeoutException as e:
+            raise TimeoutError(f"Supabase storage download timed out: {e}") from e
+        except Exception as e:
+            if not isinstance(e, (FileNotFoundError, RuntimeError, TimeoutError)):
+                raise RuntimeError(f"Supabase storage download error: {type(e).__name__}") from e
+            raise
+
+    def delete_file(self, storage_path: str) -> bool:
+        import httpx
+        import urllib.parse
+
+        try:
+            key = self._parse_and_validate_uri(storage_path)
+        except Exception:
+            return False
+
+        encoded_key = "/".join(urllib.parse.quote(seg, safe="") for seg in key.split("/"))
+        encoded_bucket = urllib.parse.quote(self.bucket, safe="")
+
+        url = f"{self.supabase_url}/storage/v1/object/{encoded_bucket}/{encoded_key}"
+
+        try:
+            with httpx.Client(timeout=self.timeout) as client:
+                resp = client.delete(url, headers=self.headers)
+                return resp.status_code in (200, 204, 404)
+        except Exception:
+            return False
+
+
 def get_storage_service() -> BaseStorageService:
-    if settings.STORAGE_PROVIDER.lower() in ("s3", "r2", "cloudflare") and settings.S3_ACCESS_KEY:
+    provider = settings.STORAGE_PROVIDER.lower()
+    if provider in ("supabase", "supabase_storage") and settings.SUPABASE_URL and settings.SUPABASE_SERVICE_ROLE_KEY:
+        return SupabaseStorageService()
+    if provider in ("s3", "r2", "cloudflare") and settings.S3_ACCESS_KEY:
         return S3StorageService()
     return LocalStorageService()

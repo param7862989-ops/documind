@@ -61,8 +61,8 @@ class Settings(BaseSettings):
     AI_QUOTA_PER_USER_DAILY: int = 200
     LOG_LEVEL: str = "INFO"
 
-    # Cloud Object Storage (S3 / MinIO / Cloudflare R2)
-    STORAGE_PROVIDER: str = "local"  # "local" or "s3"
+    # Cloud Object Storage ("local", "supabase", "s3", "r2")
+    STORAGE_PROVIDER: str = "local"  # "local", "supabase", or "s3"
     LOCAL_STORAGE_DIR: str = "./storage/uploads"
     MAX_FILE_SIZE_MB: int = 50
     S3_BUCKET_NAME: str = "documind-documents"
@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     S3_ACCESS_KEY: str = ""
     S3_SECRET_KEY: str = ""
     S3_ENDPOINT_URL: str = ""  # For MinIO or Cloudflare R2
+
+    # Supabase Storage Configuration (Free Tier Persistent Storage)
+    SUPABASE_URL: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_STORAGE_BUCKET: str = "documind-documents"
 
     @field_validator("SECRET_KEY")
     def validate_secret_key(cls, v: str, info) -> str:
@@ -101,6 +106,16 @@ class Settings(BaseSettings):
         if env.lower() == "production" and (ai_provider.lower() == "openai" or emb_provider.lower() == "openai") and not v:
             raise ValueError(
                 "CRITICAL: In production with OpenAI configured as AI_PROVIDER or EMBEDDING_PROVIDER, OPENAI_API_KEY must be configured."
+            )
+        return v
+
+    @field_validator("SUPABASE_SERVICE_ROLE_KEY")
+    def validate_supabase_service_key(cls, v: str, info) -> str:
+        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        storage_provider = info.data.get("STORAGE_PROVIDER", "local") if info.data else "local"
+        if env.lower() == "production" and storage_provider.lower() in ("supabase", "supabase_storage") and not v:
+            raise ValueError(
+                "CRITICAL: In production with Supabase Storage configured as STORAGE_PROVIDER, SUPABASE_SERVICE_ROLE_KEY must be configured."
             )
         return v
 

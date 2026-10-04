@@ -118,11 +118,25 @@ def test_ai_usage_service_metrics_and_quota():
     assert "429" in str(excinfo.value) or "quota" in str(excinfo.value).lower()
 
 
-from app.services.storage import S3StorageService, LocalStorageService, get_storage_service
+from app.services.storage import S3StorageService, LocalStorageService, SupabaseStorageService, get_storage_service
 
 
 def test_storage_service_provider_selection():
-    """Verify get_storage_service resolves correctly for s3, r2, cloudflare, and local providers."""
+    """Verify get_storage_service resolves correctly for supabase, s3, r2, cloudflare, and local providers."""
+    # Test supabase provider selection
+    with patch.object(settings, "STORAGE_PROVIDER", "supabase"), \
+         patch.object(settings, "SUPABASE_URL", "https://xyz.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "secret_key"):
+        service = get_storage_service()
+        assert isinstance(service, SupabaseStorageService)
+
+    # Test supabase_storage alias
+    with patch.object(settings, "STORAGE_PROVIDER", "supabase_storage"), \
+         patch.object(settings, "SUPABASE_URL", "https://xyz.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "secret_key"):
+        service = get_storage_service()
+        assert isinstance(service, SupabaseStorageService)
+
     # Test s3 provider selection
     with patch.object(settings, "STORAGE_PROVIDER", "s3"), patch.object(settings, "S3_ACCESS_KEY", "key"):
         service = get_storage_service()
@@ -138,10 +152,160 @@ def test_storage_service_provider_selection():
         service = get_storage_service()
         assert isinstance(service, S3StorageService)
 
-    # Test fallback to LocalStorageService when provider is local or access key is missing
+    # Test fallback to LocalStorageService when provider is local or keys are missing
     with patch.object(settings, "STORAGE_PROVIDER", "local"), patch.object(settings, "S3_ACCESS_KEY", ""):
         service = get_storage_service()
         assert isinstance(service, LocalStorageService)
+
+
+def test_supabase_storage_missing_config():
+    """Verify SupabaseStorageService initialization validates required credentials."""
+    with patch.object(settings, "SUPABASE_URL", ""), patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", ""):
+        with pytest.raises(ValueError) as excinfo:
+            SupabaseStorageService()
+        assert "SUPABASE_URL" in str(excinfo.value)
+
+
+def test_supabase_storage_save_file_success():
+    """Verify SupabaseStorageService uploads correctly using REST API with authenticated headers."""
+    import httpx
+
+    with patch.object(settings, "SUPABASE_URL", "https://test-project.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "service_role_secret"), \
+         patch.object(settings, "SUPABASE_STORAGE_BUCKET", "documind-documents"):
+
+        service = SupabaseStorageService()
+        file_bytes = b"PDF document binary data for DocuMind test"
+        file_obj = io.BytesIO(file_bytes)
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_client.post.return_value = mock_resp
+
+            uri = service.save_file(
+                file_obj=file_obj,
+                filename="Contract 2026.pdf",
+                content_type="application/pdf",
+                user_id="user_123",
+                document_id="doc_456"
+            )
+
+            assert uri == "supabase://documind-documents/uploads/user_123/doc_456/original.pdf"
+            mock_client.post.assert_called_once()
+            call_args, call_kwargs = mock_client.post.call_args
+            assert "https://test-project.supabase.co/storage/v1/object/documind-documents/uploads/user_123/doc_456/original.pdf" in call_args[0]
+            assert call_kwargs["headers"]["apikey"] == "service_role_secret"
+            assert call_kwargs["headers"]["Authorization"] == "Bearer service_role_secret"
+            assert call_kwargs["headers"]["Content-Type"] == "application/pdf"
+            assert call_kwargs["headers"]["x-upsert"] == "true"
+            assert call_kwargs["content"] == file_bytes
+
+
+def test_supabase_storage_get_file_success():
+    """Verify SupabaseStorageService downloads from private authenticated endpoint."""
+    import httpx
+
+    with patch.object(settings, "SUPABASE_URL", "https://test-project.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "service_role_secret"), \
+         patch.object(settings, "SUPABASE_STORAGE_BUCKET", "documind-documents"):
+
+        service = SupabaseStorageService()
+        file_bytes = b"Retrieved document binary data"
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_resp = MagicMock()
+            mock_resp.status_code = 200
+            mock_resp.content = file_bytes
+            mock_client.get.return_value = mock_resp
+
+            data = service.get_file("supabase://documind-documents/uploads/user_123/doc_456/original.pdf")
+            assert data == file_bytes
+
+            mock_client.get.assert_called_once()
+            call_args, call_kwargs = mock_client.get.call_args
+            assert "/storage/v1/object/authenticated/documind-documents/uploads/user_123/doc_456/original.pdf" in call_args[0]
+            assert call_kwargs["headers"]["Authorization"] == "Bearer service_role_secret"
+
+
+def test_supabase_storage_delete_file_success():
+    """Verify SupabaseStorageService deletes object and handles 200/204/404 safely."""
+    with patch.object(settings, "SUPABASE_URL", "https://test-project.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "service_role_secret"), \
+         patch.object(settings, "SUPABASE_STORAGE_BUCKET", "documind-documents"):
+
+        service = SupabaseStorageService()
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+            mock_resp = MagicMock()
+            mock_resp.status_code = 204
+            mock_client.delete.return_value = mock_resp
+
+            deleted = service.delete_file("supabase://documind-documents/uploads/user_123/doc_456/original.pdf")
+            assert deleted is True
+            mock_client.delete.assert_called_once()
+
+
+def test_supabase_storage_error_handling_and_timeouts():
+    """Verify SupabaseStorageService handles 404, HTTP error statuses, and timeouts safely."""
+    import httpx
+
+    with patch.object(settings, "SUPABASE_URL", "https://test-project.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "service_role_secret"), \
+         patch.object(settings, "SUPABASE_STORAGE_BUCKET", "documind-documents"):
+
+        service = SupabaseStorageService()
+
+        with patch("httpx.Client") as mock_client_cls:
+            mock_client = MagicMock()
+            mock_client_cls.return_value.__enter__.return_value = mock_client
+
+            # 404 on get_file raises FileNotFoundError
+            mock_404 = MagicMock(status_code=404)
+            mock_client.get.return_value = mock_404
+            with pytest.raises(FileNotFoundError):
+                service.get_file("supabase://documind-documents/uploads/u1/d1/original.pdf")
+
+            # 500 on upload raises RuntimeError
+            mock_500 = MagicMock(status_code=500, text="Internal Server Error")
+            mock_client.post.return_value = mock_500
+            with pytest.raises(RuntimeError):
+                service.save_file(io.BytesIO(b"data"), "test.txt")
+
+            # Timeout on get_file raises TimeoutError
+            mock_client.get.side_effect = httpx.ReadTimeout("Connection timed out")
+            with pytest.raises(TimeoutError):
+                service.get_file("supabase://documind-documents/uploads/u1/d1/original.pdf")
+
+
+def test_supabase_storage_uri_validation_and_security():
+    """Verify strict Supabase URI parsing blocks scheme spoofing, bucket mismatch, and directory traversal."""
+    with patch.object(settings, "SUPABASE_URL", "https://test-project.supabase.co"), \
+         patch.object(settings, "SUPABASE_SERVICE_ROLE_KEY", "service_role_secret"), \
+         patch.object(settings, "SUPABASE_STORAGE_BUCKET", "documind-documents"):
+
+        service = SupabaseStorageService()
+
+        # Non-supabase scheme rejected
+        with pytest.raises(ValueError) as excinfo:
+            service._parse_and_validate_uri("s3://documind-documents/uploads/u1/d1/original.pdf")
+        assert "Invalid Supabase storage URI" in str(excinfo.value)
+
+        # Bucket mismatch rejected
+        with pytest.raises(ValueError) as excinfo:
+            service._parse_and_validate_uri("supabase://other-bucket/uploads/u1/d1/original.pdf")
+        assert "mismatch" in str(excinfo.value)
+
+        # Path traversal rejected
+        with pytest.raises(ValueError) as excinfo:
+            service._parse_and_validate_uri("supabase://documind-documents/../etc/passwd")
+        assert "unsafe" in str(excinfo.value)
 
 
 def test_s3_storage_service_r2_endpoint_and_addressing_config():
