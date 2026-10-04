@@ -247,9 +247,16 @@ class SupabaseStorageService(BaseStorageService):
             with httpx.Client(timeout=self.timeout) as client:
                 resp = client.post(url, headers=upload_headers, content=file_bytes)
                 if resp.status_code not in (200, 201):
+                    try:
+                        error_detail = resp.json()
+                    except ValueError:
+                        error_detail = resp.text[:500]
+
                     raise RuntimeError(
-                        f"Supabase storage upload failed with status {resp.status_code}."
+                        f"Supabase storage upload failed with status "
+                        f"{resp.status_code}: {error_detail}"
                     )
+
         except httpx.TimeoutException as e:
             raise TimeoutError(f"Supabase storage upload timed out: {e}") from e
         except Exception as e:
